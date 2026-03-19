@@ -3,7 +3,7 @@ name = "rat-project"
 version = "0.1.0"
 description = ""
 authors = [
-    {name = "Your Name", email = "you@example.com"}
+    {name = "panicatboot", email = "100204853+panicatboot@users.noreply.github.com"}, {name = "nassima03", email = "nassimabouaraba03@gmail.com"}
 ]
 requires-python = ">=3.14"
 dependencies = []
