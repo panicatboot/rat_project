@@ -8,11 +8,11 @@ def test_encode_decode_message() -> None:
     payload = {"type": "hello", "message": "bonjour"}
 
     encoded = encode_message(payload)
-    decoded = decode_message(encoded)
+    decoded = decode_message(encoded.decode("utf-8").strip())
 
     assert decoded == payload
 
 
 def test_decode_invalid_json_raises_protocol_error() -> None:
     with pytest.raises(ProtocolError):
-        decode_message(b"not-json")
+        decode_message("not-json")

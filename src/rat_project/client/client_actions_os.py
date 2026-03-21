@@ -13,7 +13,10 @@ def get_system_info() -> str:
     else:
         return f"Unsupported operating system: {system_name}"
 
-    encoding = locale.getpreferredencoding(False)
+    if system_name == "Windows":
+        encoding = "cp850"
+    else:
+        encoding = locale.getpreferredencoding(False)
 
     completed = subprocess.run(
         command,
