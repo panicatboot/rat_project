@@ -42,7 +42,6 @@ description = "Foreign Function Interface for Python calling C code."
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "platform_python_implementation != \"PyPy\""
 files = [
     {file = "cffi-2.0.0-cp310-cp310-macosx_10_13_x86_64.whl", hash = "sha256:0cf2d91ecc3fcc0625c2c530fe004f82c110405f101548512cce44322fa8ac44"},
     {file = "cffi-2.0.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:f73b96c41e3b2adedc34a7356e64c8eb96e03a3782b535e043a986276ce12a49"},
@@ -562,7 +561,7 @@ description = "C parser in Python"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "platform_python_implementation != \"PyPy\" and implementation_name != \"PyPy\""
+markers = "implementation_name != \"PyPy\""
 files = [
     {file = "pycparser-3.0-py3-none-any.whl", hash = "sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"},
     {file = "pycparser-3.0.tar.gz", hash = "sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29"},
@@ -779,6 +778,28 @@ files = [
 ]
 
 [[package]]
+name = "sounddevice"
+version = "0.5.5"
+description = "Play and Record Sound with Python"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "sounddevice-0.5.5-py3-none-any.whl", hash = "sha256:30ff99f6c107f49d25ad16a45cacd8d91c25a1bcdd3e81a206b921a3a6405b1f"},
+    {file = "sounddevice-0.5.5-py3-none-macosx_10_6_x86_64.macosx_10_6_universal2.whl", hash = "sha256:05eb9fd6c54c38d67741441c19164c0dae8ce80453af2d8c4ad2e7823d15b722"},
+    {file = "sounddevice-0.5.5-py3-none-win32.whl", hash = "sha256:1234cc9b4c9df97b6cbe748146ae0ec64dd7d6e44739e8e42eaa5b595313a103"},
+    {file = "sounddevice-0.5.5-py3-none-win_amd64.whl", hash = "sha256:cfc6b2c49fb7f555591c78cb8ecf48d6a637fd5b6e1db5fec6ed9365d64b3519"},
+    {file = "sounddevice-0.5.5-py3-none-win_arm64.whl", hash = "sha256:3861901ddd8230d2e0e8ae62ac320cdd4c688d81df89da036dcb812f757bb3e6"},
+    {file = "sounddevice-0.5.5.tar.gz", hash = "sha256:22487b65198cb5bf2208755105b524f78ad173e5ab6b445bdab1c989f6698df3"},
+]
+
+[package.dependencies]
+cffi = "*"
+
+[package.extras]
+numpy = ["numpy"]
+
+[[package]]
 name = "soupsieve"
 version = "2.8.3"
 description = "A modern CSS selector implementation for Beautiful Soup."
@@ -872,4 +893,4 @@ python-discovery = ">=1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.14"
-content-hash = "163ff702c0357a3b6980ee07251f6511d094e7bf4503fa1d8bfe798a94934b46"
+content-hash = "13e55e7062142482b34a0ea5b9705afdac8c367ecf5cac24f1e8808c99672932"
