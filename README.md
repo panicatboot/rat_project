@@ -26,11 +26,6 @@ poetry run python generate_cert.py
 ```
 PYTHONPATH=src poetry run python src/rat_project/server/server_app.py
 ```
-#### options
-rat > help                  # affiche ce menu
-rat > sessions              # liste les agents connectés
-rat > interact <id>         # entre dans un agent (ex: interact 1)
-rat > exit                  # quitte le serveur
 
 ### 3. Démarrer l'agent / client (terminal 2)
 
@@ -39,6 +34,10 @@ PYTHONPATH=src poetry run python src/rat_project/client/client_app.py
 ```
 
 > Par défaut, l'agent se connecte à `127.0.0.1:8888`. Pour changer l'adresse, modifier `HOST` dans `src/rat_project/client/client_app.py`.
+
+# Search
+
+```PYTHONPATH=src poetry run pytest tests/test_client_actions.py::test_search_file_found tests/test_client_actions.py::test_search_file_not_found -v```
 
 ## Utilisation du serveur
 
