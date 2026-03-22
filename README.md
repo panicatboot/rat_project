@@ -26,6 +26,11 @@ poetry run python generate_cert.py
 ```
 PYTHONPATH=src poetry run python src/rat_project/server/server_app.py
 ```
+#### options
+rat > help                  # affiche ce menu
+rat > sessions              # liste les agents connectés
+rat > interact <id>         # entre dans un agent (ex: interact 1)
+rat > exit                  # quitte le serveur
 
 ### 3. Démarrer l'agent / client (terminal 2)
 
@@ -60,6 +65,7 @@ rat agent 1 > back          # revenir au menu principal
 ```
 poetry run pytest
 ```
+// errors
 
 ## Structure du projet
 
