@@ -15,19 +15,19 @@ poetry install
 
 ## Lancer le projet
 
-### 1. Générer les certificats TLS (une seule fois)
+### Générer les certificats TLS (une seule fois)
 
 ```
 poetry run python generate_cert.py
 ```
 
-### 2. Démarrer le serveur (terminal 1)
+### Démarrer le serveur (terminal 1)
 
 ```
 PYTHONPATH=src poetry run python src/rat_project/server/server_app.py
 ```
 
-### 3. Démarrer l'agent / client (terminal 2)
+### Démarrer l'agent / client (terminal 2)
 
 ```
 PYTHONPATH=src poetry run python src/rat_project/client/client_app.py
