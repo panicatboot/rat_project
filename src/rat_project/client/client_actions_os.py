@@ -167,14 +167,13 @@ def search_file(filename: str) -> str:
     """
     results = []
 
-    # On part de la racine et on cherche récursivement
+    # Recherche récursive depuis la racine
     root = Path("C:/") if _get_os() == "Windows" else Path("/")
 
     for path in root.rglob(filename):
         try:
             results.append(str(path))
         except PermissionError:
-            # On ignore les dossiers sans permission
             continue
 
     if not results:
