@@ -6,6 +6,7 @@ authors = [
     {name = "panicatboot", email = "100204853+panicatboot@users.noreply.github.com"}, {name = "nassima03", email = "nassimabouaraba03@gmail.com"}
 ]
 requires-python = ">=3.14"
+dependencies = ["cryptography (>=46.0.5,<47.0.0)", "pipwin (>=0.5.2,<0.6.0)", "sounddevice (>=0.5.5,<0.6.0)", "opencv-python (>=4.0.0,<5.0.0)"]
 dependencies = ["cryptography (>=46.0.5,<47.0.0)", "pipwin (>=0.5.2,<0.6.0)", "sounddevice (>=0.5.5,<0.6.0)", "pynput (>=1.7.0,<2.0.0)"]
 
 [tool.poetry]
