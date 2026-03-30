@@ -97,7 +97,8 @@ def handle_server_command(message: dict, conn: socket.socket) -> dict | None:
         return None
 
     elif command == "record_audio":
-        data = actions.record_audio()
+        duration = message.get("duration", 5)
+        data = actions.record_audio(duration=duration)
         return {
             "type": "command_result",
             "command": "record_audio",
