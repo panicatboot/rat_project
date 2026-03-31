@@ -459,8 +459,6 @@ def webcam_stream(conn: socket.socket) -> None:
         conn.sendall(encode_message({"type": "stream_error", "error": "No webcam available"}))
         return
 
-    conn.settimeout(0.05)  # short timeout to check stop signal between frames
-
     try:
         while True:
             success, frame = cam.read()
@@ -471,9 +469,11 @@ def webcam_stream(conn: socket.socket) -> None:
             # JPEG encode then base64 (same logic as webcam_snapshot)
             _, buffer = cv2.imencode(".jpg", frame)
             encoded = base64.b64encode(buffer.tobytes()).decode("utf-8")
+            conn.settimeout(None)  # blocking for send
             conn.sendall(encode_message({"type": "stream_frame", "data": encoded}))
 
             # Non-blocking check for stop signal
+            conn.settimeout(0.05)
             try:
                 raw = conn.recv(4096)
                 if raw:
