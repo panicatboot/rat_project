@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 certs/
 downloads/
+*.jpg
+testna.txt

