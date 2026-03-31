@@ -9,7 +9,7 @@ Compatible with Windows and Linux.
 import platform
 import socket
 
-from rat_project.common.protocol import decode_message, encode_message
+from rat_project.common.protocol import decode_message, encode_message, recv_message
 from rat_project.common.tls import create_client_ssl_context
 from rat_project.utils.logger_config import setup_logger
 
@@ -148,19 +148,12 @@ def run_client() -> None:
                 logger.info("Registration sent: %s", payload)
 
                 # Acknowledgement
-                data = client_socket.recv(4096)
-                ack = decode_message(data.decode("utf-8").strip())
+                ack = recv_message(client_socket)
                 logger.info("ACK received: %s", ack)
 
                 # Main loop
                 while True:
-                    data = client_socket.recv(65536)
-
-                    if not data:
-                        logger.info("Server disconnected.")
-                        break
-
-                    server_message = decode_message(data.decode("utf-8").strip())
+                    server_message = recv_message(client_socket)
                     logger.info("Message received: %s", server_message)
 
                     response = handle_server_command(server_message, client_socket)
