@@ -1,5 +1,5 @@
 """
-Tests unitaires pour les fonctions download et upload de client_actions_os.
+Unit tests for the download and upload functions of client_actions_os.
 """
 
 from pathlib import Path
@@ -15,10 +15,10 @@ from rat_project.client.client_actions_os import handle_download, handle_upload
 
 
 def test_download_fichier_existant(tmp_path: Path) -> None:
-    """Un fichier existant doit être retourné encodé en base64."""
+    """An existing file must be returned encoded in base64."""
     import base64
 
-    # Création d'un fichier temporaire avec du contenu
+    # Create a temporary file with content
     test_file = tmp_path / "test.txt"
     test_file.write_text("contenu de test", encoding="utf-8")
 
@@ -27,13 +27,13 @@ def test_download_fichier_existant(tmp_path: Path) -> None:
     assert response["command"] == "download"
     assert "error" not in response
     assert "data" in response
-    # Vérification que le contenu décodé correspond bien au fichier original
+    # Verify that the decoded content matches the original file
     decoded = base64.b64decode(response["data"])
     assert decoded == b"contenu de test"
 
 
 def test_download_fichier_inexistant() -> None:
-    """Un chemin inexistant doit retourner une erreur."""
+    """A non-existing path must return an error."""
     response = handle_download("/chemin/qui/nexiste/pas/fichier.txt")
 
     assert response["command"] == "download"
@@ -42,7 +42,7 @@ def test_download_fichier_inexistant() -> None:
 
 
 def test_download_dossier_renvoie_erreur(tmp_path: Path) -> None:
-    """Un dossier (pas un fichier) doit retourner une erreur."""
+    """A directory (not a file) must return an error."""
     response = handle_download(str(tmp_path))
 
     assert response["command"] == "download"
@@ -50,7 +50,7 @@ def test_download_dossier_renvoie_erreur(tmp_path: Path) -> None:
 
 
 def test_download_retourne_nom_fichier(tmp_path: Path) -> None:
-    """La réponse doit contenir le nom du fichier."""
+    """The response must contain the filename."""
     test_file = tmp_path / "rapport.pdf"
     test_file.write_bytes(b"fake pdf content")
 
@@ -65,10 +65,10 @@ def test_download_retourne_nom_fichier(tmp_path: Path) -> None:
 
 
 def test_upload_ecrit_fichier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Un fichier uploadé doit être écrit sur le disque."""
+    """An uploaded file must be written to disk."""
     import base64
 
-    # On se place dans le dossier temporaire pour que le fichier soit écrit là
+    # Change to the temporary directory so the file is written there
     monkeypatch.chdir(tmp_path)
 
     contenu = b"fichier envoye par le serveur"
@@ -83,7 +83,7 @@ def test_upload_ecrit_fichier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_upload_sans_data_retourne_erreur() -> None:
-    """Un message sans données doit retourner une erreur."""
+    """A message without data must return an error."""
     response = handle_upload({"filename": "vide.txt", "data": ""})
 
     assert response["command"] == "upload"

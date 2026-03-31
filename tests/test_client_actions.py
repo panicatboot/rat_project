@@ -1,9 +1,9 @@
 """
-Tests unitaires pour les actions client du RAT.
+Unit tests for RAT client actions.
 
-Couvre : get_system_info, get_ipconfig, take_screenshot, handle_shell,
-         record_audio, webcam_snapshot, webcam_stream,
-         toggle_keylogger, search_file, hashdump.
+Covers: get_system_info, get_ipconfig, take_screenshot, handle_shell,
+        record_audio, webcam_snapshot, webcam_stream,
+        toggle_keylogger, search_file, hashdump.
 """
 
 import base64
@@ -74,9 +74,9 @@ def test_get_ipconfig_windows_uses_ipconfig() -> None:
 
 
 def test_take_screenshot_returns_base64_string() -> None:
-    # ImageGrab est importé localement dans take_screenshot — on patche le module PIL directement
+    # ImageGrab is imported locally in take_screenshot — we patch the PIL module directly
     fake_img = MagicMock()
-    # save() écrit des octets dans le buffer pour simuler une vraie image
+    # save() writes bytes into the buffer to simulate a real image
     fake_img.save = MagicMock(side_effect=lambda buf, format: buf.write(b"fake_jpeg"))
 
     with patch("PIL.ImageGrab.grab", return_value=fake_img):
@@ -97,7 +97,7 @@ def test_take_screenshot_returns_empty_string_on_error() -> None:
 
 
 def test_handle_shell_executes_command_and_sends_output() -> None:
-    # Message shell_input puis déconnexion
+    # shell_input message then disconnection
     shell_input_msg = json.dumps({"type": "shell_input", "input": "echo hello"}).encode() + b"\n"
     stop_msg = json.dumps({"type": "command", "command": "shell_stop"}).encode() + b"\n"
 
@@ -108,7 +108,7 @@ def test_handle_shell_executes_command_and_sends_output() -> None:
         mock_run.return_value = MagicMock(stdout="hello\n", stderr="")
         handle_shell(mock_conn)
 
-    # On vérifie qu'une réponse shell_output a bien été envoyée
+    # Verify that a shell_output response was sent
     sent_calls = [call[0][0].decode() for call in mock_conn.sendall.call_args_list]
     assert any("shell_output" in msg for msg in sent_calls)
 
@@ -119,7 +119,7 @@ def test_handle_shell_stops_on_shell_stop() -> None:
     mock_conn = MagicMock()
     mock_conn.recv.return_value = stop_msg
 
-    handle_shell(mock_conn)  # doit s'arrêter sans boucle infinie
+    handle_shell(mock_conn)  # must stop without infinite loop
     mock_conn.sendall.assert_not_called()
 
 
@@ -254,11 +254,11 @@ def test_toggle_keylogger_stop_returns_captured_keys() -> None:
 
 
 def test_search_file_found() -> None:
-    # On crée un fichier temporaire et on limite la recherche à son répertoire parent
+    # Create a temporary file and limit the search to its parent directory
     with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp:
         tmp_path = Path(tmp.name)
 
-    # On remplace la racine de recherche par le répertoire parent du fichier
+    # Replace the search root with the file's parent directory
     with patch("rat_project.client.client_actions_os.Path") as mock_path_class:
         mock_path_class.return_value = tmp_path.parent
         mock_path_class.side_effect = lambda p: tmp_path.parent if p in ("C:/", "/") else Path(p)
@@ -270,7 +270,7 @@ def test_search_file_found() -> None:
 
 
 def test_search_file_not_found() -> None:
-    # On limite la recherche au répertoire /tmp pour éviter un parcours complet
+    # Limit the search to /tmp to avoid a full filesystem scan
     with patch("rat_project.client.client_actions_os._get_os", return_value="Linux"):
         with patch("pathlib.Path.rglob", return_value=iter([])):
             result = search_file("fichier_qui_nexiste_vraiment_pas_12345.xyz")

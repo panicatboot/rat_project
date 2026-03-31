@@ -1,5 +1,5 @@
 def test_project_structure():
     """
-    Test de base pour vérifier que l'environnement de test fonctionne.
+    Basic test to verify that the test environment works.
     """
     assert True

