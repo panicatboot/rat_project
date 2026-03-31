@@ -333,16 +333,14 @@ def search_file(filename: str) -> str:
     Returns:
         str: List of found paths, or a message if no results.
     """
+    import os as _os
+
     results = []
+    root = "C:\\" if _get_os() == "Windows" else "/"
 
-    # Recursive search from the root
-    root = Path("C:/") if _get_os() == "Windows" else Path("/")
-
-    for path in root.rglob(filename):
-        try:
-            results.append(str(path))
-        except PermissionError:
-            continue
+    for dirpath, _, filenames in _os.walk(root, onerror=lambda e: None):
+        if filename in filenames:
+            results.append(_os.path.join(dirpath, filename))
 
     if not results:
         return f"No file found for: {filename}"

