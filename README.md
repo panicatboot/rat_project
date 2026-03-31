@@ -5,6 +5,9 @@ Remote Administration Tool system composed of a **server** and a **client** (age
 
 ## Preview
 
+<img width="1241" height="317" alt="image" src="https://github.com/user-attachments/assets/c19e70ea-a55e-4f14-a848-5312d0090941" />
+<img width="1482" height="679" alt="image" src="https://github.com/user-attachments/assets/479c15e3-da80-42e3-9403-0e289c974df0" />
+
 ## Features
 
 ### Client (agent)
