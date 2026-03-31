@@ -274,7 +274,7 @@ def test_search_file_not_found() -> None:
     with patch("rat_project.client.client_actions_os._get_os", return_value="Linux"):
         with patch("pathlib.Path.rglob", return_value=iter([])):
             result = search_file("fichier_qui_nexiste_vraiment_pas_12345.xyz")
-    assert "Aucun fichier trouvé" in result
+    assert "No file found" in result
 
 
 # ---------------------------------------------------------------------------
