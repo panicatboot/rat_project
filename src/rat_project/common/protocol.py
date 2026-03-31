@@ -1,4 +1,5 @@
 import json
+import socket
 from typing import Any, List, Tuple
 
 from rat_project.common.exceptions import ProtocolError
@@ -21,6 +22,17 @@ def decode_message(raw_message: str) -> dict[str, Any]:
         raise ProtocolError("Protocol message must be a dictionary")
 
     return decoded
+
+
+def recv_message(conn: socket.socket) -> dict[str, Any]:
+    """Read from socket until a full JSON line (ending with newline) is received."""
+    buffer = b""
+    while b"\n" not in buffer:
+        chunk = conn.recv(65536)
+        if not chunk:
+            raise ProtocolError("Connection closed before full message received")
+        buffer += chunk
+    return decode_message(buffer.decode("utf-8").strip())
 
 
 def extract_messages(buffer: str) -> Tuple[List[dict[str, Any]], str]:

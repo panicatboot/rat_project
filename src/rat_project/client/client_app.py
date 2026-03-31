@@ -9,7 +9,7 @@ Compatible with Windows and Linux.
 import platform
 import socket
 
-from rat_project.common.protocol import decode_message, encode_message
+from rat_project.common.protocol import decode_message, encode_message, recv_message
 from rat_project.common.tls import create_client_ssl_context
 from rat_project.utils.logger_config import setup_logger
 

