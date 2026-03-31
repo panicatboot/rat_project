@@ -11,6 +11,14 @@ dependencies = ["cryptography (>=46.0.5,<47.0.0)", "pipwin (>=0.5.2,<0.6.0)", "s
 [tool.poetry]
 package-mode = false
 
+[tool.poetry.dependencies]
+python = ">=3.12"
+cryptography = ">=46.0.5,<47.0.0"
+sounddevice = ">=0.5.5,<0.6.0"
+opencv-python = ">=4.0.0,<5.0.0"
+pynput = ">=1.7.0,<2.0.0"
+mss = ">=9.0.0,<10.0.0"
+
 [dependency-groups]
 dev = [
     "pytest (>=9.0.2,<10.0.0)",
