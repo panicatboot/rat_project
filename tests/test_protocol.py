@@ -5,7 +5,7 @@ from rat_project.common.protocol import decode_message, encode_message
 
 
 def test_encode_decode_message() -> None:
-    payload = {"type": "hello", "message": "bonjour"}
+    payload = {"type": "hello", "message": "hi"}
 
     encoded = encode_message(payload)
     decoded = decode_message(encoded.decode("utf-8").strip())

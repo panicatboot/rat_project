@@ -26,4 +26,4 @@ pathlib.Path("certs/server.key").write_bytes(
     )
 )
 pathlib.Path("certs/server.crt").write_bytes(cert.public_bytes(serialization.Encoding.PEM))
-print("[+] Certificat genere dans certs/")
+print("[+] Certificate generated in certs/")
